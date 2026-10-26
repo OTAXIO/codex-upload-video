@@ -1,0 +1,8 @@
+{
+  "name": "codex-upload-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex Bilibili upload skill with local authentication and verified receipts",
+  "dependencies": {"puppeteer-core": "25.16.0"}
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "platform": "bilibili",
+  "partition": "科技数码",
+  "collection": {"name": "News", "required": true},
+  "declarations": {"original": true, "ai_generated": true, "no_reprint": true},
+  "activity": {"strategy": "relevant_popular_free", "keywords": ["AI", "科技"], "required_when_available": true},
+  "visibility": "public",
+  "captions_burned": true,
+  "tag_strategy": "agent_then_content_rules",
+  "allow_automated_publish": false
+}

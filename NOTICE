@@ -1,0 +1,37 @@
+References reviewed for this independent implementation:
+
+1. biliup/biliup, commit 48a0d234794bb918e211076b357823438e8c109d.
+   https://github.com/biliup/biliup
+   Reviewed CLI/skill concepts and collection/upload capability. No biliup code
+   is vendored or executed by this browser backend. Its license and README
+   usage statements do not grant rights to unrelated news/media assets.
+
+2. grapeot/bilibili-upload-skill,
+   commit ec701c14342c626f79dac106016444e50e7b9507.
+   https://github.com/grapeot/bilibili-upload-skill
+   MIT, Copyright (c) 2026 grapeot. Reference for creator-page selector facts,
+   metadata boundaries, separate cover ratios, Enter-confirmed tags and
+   readback. The upstream tool requires human final submission; it is not used
+   or modified here. This repository has independent action and submit code.
+
+MIT License for the referenced material:
+
+Copyright (c) 2026 grapeot
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -1,0 +1,16 @@
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+cookies*.json
+browser-profile/
+.private/
+runtime.local.json
+*.log
+*.png
+*.mp4
+*.jpg
+state/
+.test-tmp/
