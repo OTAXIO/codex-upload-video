@@ -16,3 +16,4 @@ state/
 .test-tmp/
 
 .local-skill-backups/
+.validation/

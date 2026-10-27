@@ -1,4 +1,8 @@
 import fs from 'node:fs';
+import {pause,fault,visible,exactText,platformCheck} from './browser_ui.mjs';
+import {covers,isCoverEditor,chooseManualCoverEditing,closeCoverEditor,assertCoversVerified} from './cover_editor.mjs';
+export {pause,fault,visible,exactText,platformCheck} from './browser_ui.mjs';
+export {sameCoverPixels} from './cover_editor.mjs';
 
 // Independently implemented actions. Selector facts were checked on the 2026-10
 // creator UI; upstream references and their licenses are listed in NOTICE.
@@ -9,8 +13,14 @@ export const S={title:'.video-title input.input-val',description:'.desc-containe
   tagInput:'.tag-container .tag-input-wrp input.input-val',tags:'.tag-container .label-item-v2-container',
   topics:'.tag-topic-list > span',collection:'.video-season .season-enter',collectionOption:'.season-dropdown .season-item',
   upload:'.file-list-v2-item, .file-item',submit:'.submit-container .submit-add',cover:'.cover-module-main .cover-slot, .cover-module .cover-img'};
-export const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-export function fault(code,message,details={}){throw Object.assign(new Error(message),{code,details});}
+export function uploadEntryUrl(activity){
+  const url=new URL('https://member.bilibili.com/platform/upload/video/frame');
+  if(activity?.strategy==='explicit'){
+    if(!/^\d+$/.test(String(activity.id))||!activity.name)fault('ACTIVITY_ID_MISSING','Explicit activity needs its verified ID and name');
+    url.searchParams.set('topic_id',String(activity.id));url.searchParams.set('topic_name',activity.name);url.searchParams.set('from','activity');
+  }
+  return url.href;
+}
 export const norm=s=>(s??'').replace(/\r/g,'').replace(/\n+/g,'\n').trim();
 export function popularity(text){const m=String(text??'').match(/([\d.]+)\s*(亿|万)?(?:次播放|播放)/);return m?Number(m[1])*({'亿':1e8,'万':1e4}[m[2]]??1):null;}
 export function chooseActivity(rows,policy){
@@ -38,47 +48,22 @@ export function compareFields(actual,wanted,activity=null){
   return mismatches;
 }
 
-export async function visible(page,css,required=true){
-  for(const element of await page.$$(css))if(await element.isVisible())return element;
-  if(required)fault('SELECTOR_MISSING','Required visible control is missing',{selector:css});return null;
-}
-export async function exactText(page,text,scope='body',required=true){
-  if(required){try{await page.waitForFunction((scope,text)=>{const root=[...document.querySelectorAll(scope)].find(e=>e.getClientRects().length);if(!root)return false;let all=[...root.querySelectorAll('button,span,div,p,li,label')].filter(e=>e.getClientRects().length&&e.innerText.trim()===text);all=all.filter(e=>!all.some(other=>other!==e&&e.contains(other)));return all.length===1;},{timeout:5000},scope,text);}catch{}}
-  const handle=await page.evaluateHandle((scope,text)=>{
-    const root=[...document.querySelectorAll(scope)].find(e=>e.getClientRects().length);if(!root)return null;
-    let all=[...root.querySelectorAll('button,span,div,p,li,label')].filter(e=>e.getClientRects().length&&e.innerText.trim()===text);
-    all=all.filter(e=>!all.some(other=>other!==e&&e.contains(other)));
-    return all.length===1?all[0]:null;
-  },scope,text);
-  const element=handle.asElement();if(!element&&required)fault('AMBIGUOUS_CONTROL','Required unique text control is missing/ambiguous',{label:text});return element;
-}
 export async function textInput(page,css,value){
   const element=await visible(page,css);await element.click();
   const control=process.platform==='darwin'?'Meta':'Control';await page.keyboard.down(control);await page.keyboard.press('KeyA');await page.keyboard.up(control);
   await page.keyboard.press('Backspace');await page.keyboard.sendCharacter(value);await element.evaluate(e=>e.dispatchEvent(new Event('change',{bubbles:true})));
 }
-async function isCoverEditor(dialog){
-  // Require the known dual-slot image editor, not an arbitrary matching title.
-  const text=await dialog.evaluate(e=>e.innerText);
-  return text.includes('封面制作')&&text.includes('首页推荐封面（4:3）')&&text.includes('个人空间封面（16:9）')&&!!await dialog.$('input[type=file][accept*=image]');
-}
 export async function dismissKnown(page){
+  await chooseManualCoverEditing(page);
   for(const dialog of await page.$$('.bcc-dialog'))if(await dialog.isVisible()){
     const text=await dialog.evaluate(e=>e.innerText);
     if(text.includes('开启后视频上传完成第一时间通知')){const close=await dialog.$('.bcc-dialog__close');if(close){await close.click();continue;}}
     if(await isCoverEditor(dialog)){
-      const close=await dialog.$('.bcc-dialog__close');
-      if(!close)fault('COVER_CONTROL_MISSING','Known cover editor has no safe close control');
-      // Cancel an auto-open/stale editor; covers() later loads both final assets.
-      await close.click();
-      try{await page.waitForFunction(e=>!e.getClientRects().length,{timeout:5000},dialog);}catch{fault('COVER_SAVE_FAILED','Known cover editor did not close');}
+      await closeCoverEditor(page,dialog);
       continue;
     }
     fault('UNKNOWN_DIALOG' ,'A dialog requires a supported handling rule; no blind confirmation',{dialog_text:text.slice(0,100)});
   }
-}
-export async function platformCheck(page){
-  for(const css of ['.geetest_panel','.geetest_panel_box','.bili-mini-login','.passport-login-container'])if(await visible(page,css,false))fault('AUTH_OR_VERIFICATION_REQUIRED','Login or verification interrupted this operation');
 }
 export async function readForm(page){
   return await page.evaluate(S=>{
@@ -128,6 +113,30 @@ async function partition(page,name){
 export async function topicRows(page){
   return await page.$$eval(S.topics,els=>els.filter(e=>e.getClientRects().length).map((e,index)=>({index,id:e.getAttribute('v-model'),name:e.querySelector('.hot-tag-item>span')?.innerText.trim()??'',raw_views:e.querySelector('.des')?.textContent??'',selected:!!e.querySelector('.hot-tag-container-selected'),disabled:!!e.querySelector('.is-disabled,[disabled]'),paid:/付费|充值/.test(e.innerText)})));
 }
+async function searchExplicitActivity(page,chosen){
+  const more=await page.$('::-p-text(搜索更多话题)')??await page.$('::-p-text(搜索更多活动)');
+  if(!more)fault('ACTIVITY_CONTROL_MISSING','Activity search entry is missing');
+  await more.click();
+  const input=await visible(page,'input.bcc-search-input');
+  await input.click();await input.evaluate(e=>e.select());await input.press('Backspace');
+  await input.type(chosen.name,{delay:40});await input.press('Enter');
+  let matches=[];
+  for(let tick=0;tick<20;tick++){
+    await pause(250);matches=[];
+    for(const row of await page.$$('.dialog-item')){
+      if(!await row.isVisible())continue;
+      const name=await row.$eval('.topic-tag-name',e=>e.innerText.trim()).catch(()=>null);
+      if(name===chosen.name)matches.push(row);
+    }
+    if(matches.length)break;
+  }
+  if(matches.length!==1||!await matches[0].$('.topic-activity-icon'))fault('ACTIVITY_NOT_AVAILABLE','Exact required activity was not uniquely available in activity search',{name:chosen.name});
+  await (await matches[0].$('.check-radio-v2-container')).click();
+  const buttons=[];
+  for(const button of await page.$$('button.submit-add'))if(await button.isVisible()&&await button.evaluate(e=>e.innerText.trim()==='确定'))buttons.push(button);
+  if(buttons.length!==1)fault('AMBIGUOUS_CONTROL','Cannot uniquely identify activity selection confirmation');
+  await buttons[0].click();
+}
 async function activity(page,policy){
   const rows=(await topicRows(page)).map(x=>({...x,views:popularity(x.raw_views)}));
   if(!await page.$('.tag-topic-list'))fault('ACTIVITY_CONTROL_MISSING','Cannot inspect activity eligibility');
@@ -139,11 +148,10 @@ async function activity(page,policy){
   if(chosen&&!chosen.selected){
     if(!/^\d+$/.test(String(chosen.id??'')))fault('ACTIVITY_ID_MISSING','Activity has no stable platform identifier');
     if(missingExplicit){
-      // The creator UI says “use the activity tag to participate”. An explicit
-      // event need not appear in the six recommendations. Enter its EXACT tag;
-      // only a real platform topic-icon counts, never an ordinary text tag.
+      // Reserved activity tags must be selected through the participation
+      // search dialog, rather than created as ordinary tags.
       const current=await readForm(page);
-      if(!current.activity_tags.includes(chosen.name))await tags(page,[...current.tags.filter(t=>!current.activity_tags.includes(t)),chosen.name]);
+      if(!current.activity_tags.includes(chosen.name))await searchExplicitActivity(page,chosen);
       for(let tick=0;tick<20;tick++){
         if((await readForm(page)).activity_tags.includes(chosen.name))break;
         await pause(250);
@@ -153,7 +161,7 @@ async function activity(page,policy){
   const actual=await readForm(page);
   if(chosen&&!actual.activity_tags.includes(chosen.name))fault('ACTIVITY_NOT_AVAILABLE','Requested activity was not recognized by the platform; do not substitute another event',{name:chosen.name});
   if(policy.strategy==='explicit'&&actual.activity_tags.some(name=>name!==chosen.name))fault('ACTIVITY_MISMATCH','Another activity is still selected; do not submit');
-  return chosen?{...chosen,verification:missingExplicit?'exact_tag_and_platform_topic_icon':'recommended_topic_and_readback',popularity_evidence:chosen.views===null?'explicit_user_selection':'platform_displayed_views'}:null;
+  return chosen?{...chosen,verification:missingExplicit?'activity_search_exact_name_icon_and_readback':'recommended_topic_and_readback',popularity_evidence:chosen.views===null?'explicit_user_selection':'platform_displayed_views'}:null;
 }
 async function tags(page,wanted){
   for(let round=0;round<15;round++){
@@ -169,8 +177,36 @@ async function tags(page,wanted){
   for(const tag of wanted){
     if((await readForm(page)).tags.includes(tag))continue;
     if((await readForm(page)).tags.length>=10)fault('TAG_CAPACITY','Activity consumes a tag; reduce ordinary tags before publishing');
-    const input=await visible(page,S.tagInput);await input.click();await input.type(tag);await input.press('Enter');await pause(180);
+    const input=await visible(page,S.tagInput);
+    await input.click();
+    // Backspace on an empty platform tag input removes the previous chip.
+    if(await input.evaluate(e=>e.value.length>0)){
+      await input.evaluate(e=>e.select());await input.press('Backspace');
+    }
+    await pause(150);
+    await input.type(tag,{delay:35});await pause(250);
+    if(await input.evaluate(e=>e.value)!==tag){
+      // Late reactive clearing can eat the first characters of the next tag.
+      // Repair the input once in this same form before creating any chip.
+      await input.evaluate(e=>e.select());await input.press('Backspace');await pause(200);
+      await input.type(tag,{delay:50});await pause(250);
+      if(await input.evaluate(e=>e.value)!==tag)fault('TAG_INPUT_MISMATCH','Tag input did not preserve the complete requested text',{tag});
+    }
+    await input.press('Enter');
+    // The creator UI commits tag chips asynchronously; a 180ms snapshot can
+    // mistake a pending accepted tag for a rejection and abandon the upload.
+    for(let n=0;n<12;n++){
+      await pause(200);
+      if((await readForm(page)).tags.includes(tag))break;
+    }
     if(!(await readForm(page)).tags.includes(tag))fault('TAG_REJECTED','Platform did not accept a required tag',{tag});
+    let emptyReads=0;
+    for(let n=0;n<15;n++){
+      await pause(100);
+      emptyReads=await input.evaluate(e=>e.value==='')?emptyReads+1:0;
+      if(emptyReads>=3)break;
+    }
+    if(emptyReads<3)fault('TAG_INPUT_MISMATCH','Tag input did not settle after creating the previous tag',{tag});
   }
 }
 export async function collection(page,wanted,catalog){
@@ -202,52 +238,6 @@ export async function collection(page,wanted,catalog){
   const current=await readForm(page);if(current.collection_name!==chosen.name)fault('COLLECTION_MISMATCH','Collection readback differs');
   return {id:chosen.id,name:chosen.name,basis:'complete_catalog_order_and_name_readback'};
 }
-async function coverPixels(dialog,index){
-  return await dialog.evaluate((root,index)=>{
-    const canvases=[...root.querySelectorAll('canvas.lower-canvas')];
-    let image=canvases[index];
-    if(!image){const imgs=[...root.querySelectorAll('img')].filter(i=>i.getClientRects().length&&i.naturalWidth>0);imgs.sort((a,b)=>b.getBoundingClientRect().width*b.getBoundingClientRect().height-a.getBoundingClientRect().width*a.getBoundingClientRect().height);image=imgs[0];}
-    if(!image)return null;
-    const c=document.createElement('canvas');c.width=64;c.height=64;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,64,64);ctx.drawImage(image,0,0,64,64);
-    return {pixels:Array.from(ctx.getImageData(0,0,64,64).data),width:image.width,height:image.height,kind:canvases.length?'rendered_canvas':'image'};
-  },index);
-}
-export function sameCoverPixels(a,b){
-  if(!a||!b||a.pixels.length!==b.pixels.length||a.width!==b.width||a.height!==b.height)return false;
-  let total=0;for(let i=0;i<a.pixels.length;i++)total+=Math.abs(a.pixels[i]-b.pixels[i]);
-  return total/a.pixels.length<=8;
-}
-async function waitCoverEditor(page){
-  try{await page.waitForFunction(()=>[...document.querySelectorAll('.bcc-dialog')].some(e=>e.getClientRects().length&&e.innerText.includes('封面制作')&&e.querySelector('input[type=file][accept*=image]')),{timeout:10000});}
-  catch{fault('COVER_DIALOG_MISSING','Dual-cover editor did not mount before deadline');}
-}
-async function covers(page,wanted){
-  await (await visible(page,S.cover)).click();await waitCoverEditor(page);
-  const dialogs=[];for(const e of await page.$$('.bcc-dialog'))if(await e.isVisible()&&(await e.evaluate(e=>e.innerText)).includes('封面制作'))dialogs.push(e);
-  if(dialogs.length!==1)fault('COVER_DIALOG_MISSING','Cannot locate the unique dual-cover editor');
-  const dialog=dialogs[0];await dialog.evaluate(e=>e.setAttribute('data-codex-cover-dialog','true'));
-  const scope='[data-codex-cover-dialog="true"]';const recorded={};
-  for(const [name,label] of [['four_three','首页推荐封面（4:3）'],['sixteen_nine','个人空间封面（16:9）']]){
-    await (await exactText(page,label,scope)).click();await pause(250);
-    const input=await dialog.$('input[type=file][accept*=image]');if(!input)fault('COVER_INPUT_MISSING','Cover image input is missing');
-    await input.uploadFile(wanted[name].path);await pause(2200);
-    recorded[name]=await coverPixels(dialog,name==='four_three'?0:1);
-    if(!recorded[name])fault('COVER_NOT_LOADED','Uploaded cover is not visible in its slot');
-  }
-  await (await exactText(page,'完成',scope)).click();await pause(500);
-  try{await page.waitForSelector(scope,{hidden:true,timeout:30000});}catch{fault('COVER_SAVE_FAILED','Cover editor did not finish saving');}
-  await (await visible(page,S.cover)).click();await waitCoverEditor(page);
-  let checkDialog=null;for(const e of await page.$$('.bcc-dialog'))if(await e.isVisible()&&(await e.evaluate(e=>e.innerText)).includes('封面制作'))checkDialog=e;
-  if(!checkDialog)fault('COVER_READBACK_FAILED','Cannot reopen saved covers');
-  await checkDialog.evaluate(e=>e.setAttribute('data-codex-cover-dialog','true'));
-  for(const [name,label] of [['four_three','首页推荐封面（4:3）'],['sixteen_nine','个人空间封面（16:9）']]){
-    await (await exactText(page,label,scope)).click();await pause(200);
-    const actual=await coverPixels(checkDialog,name==='four_three'?0:1);
-    if(!sameCoverPixels(actual,recorded[name]))fault('COVER_READBACK_FAILED','Saved cover pixels differ from the uploaded slot',{slot:name});
-  }
-  const close=await checkDialog.$('.bcc-dialog__close');if(close)await close.click();else await (await exactText(page,'完成',scope)).click();await pause(350);
-  return {four_three:{sha256:wanted.four_three.sha256,slot_loaded:true,persisted:true,verification:'rendered_pixels'},sixteen_nine:{sha256:wanted.sixteen_nine.sha256,slot_loaded:true,persisted:true,verification:'rendered_pixels'}};
-}
 async function visibility(page,wanted){
   const desiredLabel=wanted==='public'?'公开可见':'仅自己可见';
   if((await readForm(page)).visibility===desiredLabel)return;
@@ -278,7 +268,7 @@ export async function applyFields(page,wanted,catalog){
     covers:async()=>{result.covers=await covers(page,wanted.covers);},
     visibility:async()=>visibility(page,wanted.visibility)
   };
-  const retryable={partition:['PARTITION_MISMATCH'],collection:['COLLECTION_MISMATCH'],covers:['COVER_DIALOG_MISSING','COVER_READBACK_FAILED','COVER_SAVE_FAILED','COVER_NOT_LOADED']};
+  const retryable={partition:['PARTITION_MISMATCH'],collection:['COLLECTION_MISMATCH']};
   async function set(field){
     attempts[field]=(attempts[field]??0)+1;
     try{await setters[field]();}catch(error){
@@ -312,14 +302,19 @@ export async function applyFields(page,wanted,catalog){
   }
 }
 export async function waitUpload(page,timeout=1800000){
-  const end=Date.now()+timeout;
+  const end=Date.now()+timeout;let zeroSince=null;
   while(Date.now()<end){
     await dismissKnown(page);await platformCheck(page);
     const items=await page.$$eval(S.upload,els=>els.filter(e=>e.getClientRects().length).map(e=>e.innerText));
     const text=items.join(' ');
     if(/失败|错误/.test(text))fault('UPLOAD_FAILED','Platform reports failed media upload');
     if(items.length&&/上传完成|已完成|处理完成|100(?:\.0+)?%/.test(text)&&!/(?:上传中|等待上传|剩余时间)/.test(text))return {items:items.length,complete:true};
-    if(/0\.0\s*MB\s*\/\s*0\.0\s*MB/.test(text))fault('UPLOAD_WIDGET_STALLED','Upload widget did not accept the selected file; do not select it twice');
+    // The platform first mounts a zero-byte row before it reads the File.
+    // Wait for sustained zero progress; never select the file again in this form.
+    if(/0\.0\s*MB\s*\/\s*0\.0\s*MB/.test(text)){
+      zeroSince??=Date.now();
+      if(Date.now()-zeroSince>=60000)fault('UPLOAD_WIDGET_STALLED','Upload widget stayed at zero bytes for 60 seconds; reconcile before retry');
+    }else zeroSince=null;
     await pause(2000);
   }fault('UPLOAD_TIMEOUT','Upload did not complete before deadline; reconcile before retry');
 }
@@ -329,6 +324,7 @@ export async function submitOnce(page,job,target=null){
     if(previous.submit_started)fault('RECONCILE_REQUIRED','Submit was already started for this attempt; do not click again');
   }
   await platformCheck(page);await dismissKnown(page);
+  if(job.mode==='publish'||job.meta?.changes?.covers)await assertCoversVerified(page,job.mode==='edit'?job.meta.changes.covers:job.meta?.covers);
   const button=await visible(page,S.submit);
   if(await button.evaluate(e=>e.classList.contains('disabled')||e.classList.contains('is-disabled')||e.disabled))fault('SUBMIT_DISABLED','Platform has disabled submission');
   let handler;let timeout;

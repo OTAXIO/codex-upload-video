@@ -27,10 +27,14 @@ python codex-upload/scripts/codex_upload.py --home LOCAL_PRIVATE_HOME publish MA
 
 ```text
 python -B -m unittest discover -s tests -p "test_*.py" -v
-node --test tests/forms.test.mjs
+node --test tests/forms.test.mjs tests/cover_editor.test.mjs
 ```
 
 Node DOM 测试需要设置 CUP_BROWSER=Chrome 路径；可选 CUP_PUPPETEER_MODULE 指向已有包入口，否则使用 npm 安装的依赖。该测试启动未登录的隔离浏览器，拦截所有网络，模拟平台回执，不向 B 站发稿。未设置 CUP_BROWSER 时会明确跳过 DOM 测试，不能将此视作端到端通过。
+
+生产部署强制使用完整验证入口：`python -B validate.py --node NODE_EXE --browser CHROME_EXE --puppeteer PUPPETEER_MODULE`。Python及实际Chrome回归必须全部成功、零跳过；`.validation/latest.json`绑定完整技能源码、测试、原生夹具与日志。项目`sync_upload_skill.py --apply --installed`在复制前检查该记录，代码或测试变化后必须重验。指纹覆盖scripts下全部Python/ES模块，不能只核对旧的三个文件。
+
+`cover_editor.mjs`使用原生双比例结构，按实际crop-box验证本地图像及保存后的读回。`tests/fixtures/native-cover.js`是脱敏重建的交互契约：惰性标签、真实中心点击、共享输入、隐藏干扰、同步提示和异步保存；没有平台代码或账号数据。未知结构、保存损坏、比例未激活等必须在提交前停止。已发布稿不用于开发试传。
 
 当前状态：Chrome对真实新视频已完成自动提交与公开发布核验；隔离浏览器测试覆盖双封面、声明、标签、活动、重名合集及提交回执。Edge未验证，不使用已发布稿件做二次公开测试。
 

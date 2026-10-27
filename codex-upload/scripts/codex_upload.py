@@ -20,7 +20,7 @@ def digest(path):
         for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
     return h.hexdigest()
 def implementation_fingerprint():
-    files=['scripts/codex_upload.py','scripts/browser.mjs','scripts/forms.mjs']
+    files=sorted(p.relative_to(SKILL).as_posix() for p in (SKILL/'scripts').rglob('*') if p.is_file() and p.suffix in {'.py','.mjs'} and '__pycache__' not in p.parts)
     return hashlib.sha256(''.join(f+':'+digest(SKILL/f)+'\n' for f in files).encode()).hexdigest()
 
 
@@ -84,7 +84,7 @@ def file_record(path,base):
 def tags_for(episode,title):
     text=title+' '+json.dumps(episode.get('scenes',[]),ensure_ascii=False)
     tags=['AI']
-    for pattern,label in [(r'OpenAI|Open AI','OpenAI'),(r'ChatGPT','ChatGPT'),(r'Codex','Codex'),(r'Claude|Anthropic','Claude'),(r'DeepSeek','DeepSeek'),(r'Qwen|千问','千问'),(r'GLM|Z\.ai|智谱','智谱'),(r'MiniMax','MiniMax')]:
+    for pattern,label in [(r'OpenAI|Open AI','OpenAI'),(r'ChatGPT','ChatGPT'),(r'Codex','Codex'),(r'DeepSeek','DeepSeek'),(r'Qwen|千问','千问'),(r'GLM|Z\.ai|智谱','智谱'),(r'MiniMax','MiniMax')]:
         if re.search(pattern,text,re.I):tags.append(label)
     tags+=['科技资讯']
     if episode.get('footer_tag') in ['早间新闻','午间新闻','晚间新闻','临时新闻']:tags.append(episode['footer_tag'])
@@ -106,13 +106,14 @@ def from_release(directory,home,output=None):
     for label,name in [('four_three','cover-4x3.png'),('sixteen_nine','cover-16x9.png')]:
         covers[label]=dict(**file_record(directory/name,directory),width=image_size(directory/name)[0],height=image_size(directory/name)[1])
     tags=pub.get('tags') or tags_for(episode,pub['title']);trimmed=[]
-    tags=[tag for tag in tags if tag not in cfg.get('replaced_activity_tags',[])]
+    tags=[tag for tag in tags if tag not in cfg.get('replaced_activity_tags',[]) and tag.strip().lstrip('#').casefold()!='claude']
     if cfg['activity'].get('strategy')!='none' and len(tags)>9:
         if cfg.get('tag_strategy')=='agent_then_content_rules' and not pub.get('tags_locked'):
             trimmed=tags[9:];tags=tags[:9]
         else:problem('TAG_CAPACITY','Reserve one platform tag for the required activity')
     meta=dict(schema_version=1,operation='upload',release_directory='.',episode_id=episode['id'],alert_id=episode.get('alert_id'),
         reset_event_key=next((s.get('event_key') for s in episode.get('scenes',[]) if s.get('event_key')),None) if episode.get('edition_slot')=='temporary' else None,
+        replacement=dict(authorized=True,bvid=episode.get('supersedes_bvid'),reason=episode.get('replacement_reason')) if episode.get('replacement_authorized') is True else None,
         edition_slot=episode.get('edition_slot',release.get('edition_slot')),counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
         video=video,covers=covers,title=pub['title'],description=pub.get('description',''),tags=tags,tags_reserved_for_activity=trimmed,
         partition=cfg['partition'],collection=cfg['collection'],declarations=cfg['declarations'],activity=cfg['activity'],visibility=cfg['visibility'],captions_burned=True)
@@ -129,6 +130,8 @@ def validate_meta(meta,base):
     missing=[k for k in required if k not in meta]
     if missing:problem('MISSING_REQUIREMENTS','Supply missing fields together',fields=missing)
     if meta.get('schema_version')!=1:problem('SCHEMA_VERSION','Use manifest schema_version=1')
+    replacement=meta.get('replacement')
+    if replacement is not None and (not isinstance(replacement,dict) or replacement.get('authorized') is not True or not re.fullmatch(r'BV[A-Za-z0-9]{10}',str(replacement.get('bvid',''))) or not isinstance(replacement.get('reason'),str) or len(replacement['reason'])<12):problem('INVALID_REPLACEMENT','Explicit user authorization, previous BV and correction reason are required')
     operation=meta.get('operation','upload')
     values=meta if operation=='upload' else meta['changes']
     if operation not in {'upload','edit'}:problem('INVALID_OPERATION','Only upload or edit is supported')
@@ -141,6 +144,7 @@ def validate_meta(meta,base):
     if 'tags' in values:
         tags=values['tags']
         if not isinstance(tags,list) or not 1<=len(tags)<=10 or any(not isinstance(t,str) or not 1<=len(t)<=20 for t in tags) or len(set(tags))!=len(tags):problem('INVALID_TAGS','Use 1-10 distinct relevant tags, each 1-20 characters')
+        if any(t.strip().lstrip('#').casefold()=='claude' for t in tags):problem('EXCLUDED_TAG','User excluded the Claude tag from future submissions')
     if 'declarations' in values and any(not isinstance(values['declarations'].get(k),bool) for k in ['original','ai_generated','no_reprint']):problem('INVALID_DECLARATIONS','Use explicit original/ai_generated/no_reprint booleans')
     if 'visibility' in values and values['visibility'] not in {'public','self'}:problem('INVALID_VISIBILITY','Visibility must be public or self')
     if 'activity' in values and values['activity'].get('strategy') not in {'relevant_popular_free','none','explicit'}:problem('INVALID_ACTIVITY','Unsupported activity strategy')
@@ -218,8 +222,13 @@ def execute(path,home,execute=False):
         if current.get('video_filename')!=video_name or actual.get('sha256')!=meta['video']['sha256']:problem('HASH_MISMATCH','Manifest video is not the verified release MP4')
         for state in (home/'state').glob('*.json'):
             other=read(state)
-            if state!=ledger and other.get('state') not in {'failed','ready'} and any(meta.get(k) and meta.get(k)==other.get(k) for k in ['episode_id','alert_id','reset_event_key']):problem('DUPLICATE_EDITION','This episode/reset event already has an upload attempt')
-    progress=home/'state'/(key+'.progress.json');state=dict(key=key,operation=operation,episode_id=meta.get('episode_id'),alert_id=meta.get('alert_id'),reset_event_key=meta.get('reset_event_key'),state='starting',started_at=now(),manifest=str(path))
+            if state!=ledger and other.get('state') not in {'failed','ready'} and any(meta.get(k) and meta.get(k)==other.get(k) for k in ['episode_id','alert_id','reset_event_key']):
+                replacement=meta.get('replacement') or {}
+                # A human-requested correction may supersede exactly one known
+                # submitted BV. Other duplicates/unknown attempts still block.
+                allowed=(replacement.get('authorized') is True and other.get('state') in {'submitted','published','reviewing'} and replacement.get('bvid')==other.get('receipt',{}).get('bvid') and meta.get('episode_id')!=other.get('episode_id'))
+                if not allowed:problem('DUPLICATE_EDITION','This episode/reset event already has an upload attempt')
+    progress=home/'state'/(key+'.progress.json');state=dict(key=key,operation=operation,episode_id=meta.get('episode_id'),alert_id=meta.get('alert_id'),reset_event_key=meta.get('reset_event_key'),replacement=meta.get('replacement'),state='starting',started_at=now(),manifest=str(path))
     write(ledger,state)
     progress.unlink(missing_ok=True)
     try:result=backend(home,'publish' if operation=='upload' else 'edit',meta,path.parent,progress)
@@ -255,7 +264,7 @@ def reconcile(key,home):
     field_error=state.get('result',{}).get('error',{}).get('code')
     details=state.get('result',{}).get('error',{}).get('details',{})
     cover_dialog=field_error=='UNKNOWN_DIALOG' and details.get('dialog_text','').startswith('封面制作\n')
-    retryable=cover_dialog or field_error in {'SELECTOR_MISSING','AMBIGUOUS_CONTROL','FORM_MISMATCH','COVER_CONTROL_MISSING','COLLECTION_AMBIGUOUS','ACTIVITY_CONTROL_MISSING','COVER_READBACK_FAILED','VISIBILITY_MISSING','READBACK_MISMATCH','PARTITION_MISMATCH','COVER_SAVE_FAILED','COVER_DIALOG_MISSING','COVER_INPUT_MISSING','COVER_NOT_LOADED','COLLECTION_MISMATCH'}
+    retryable=cover_dialog or field_error in {'SELECTOR_MISSING','AMBIGUOUS_CONTROL','FORM_MISMATCH','COVER_CONTROL_MISSING','COLLECTION_AMBIGUOUS','ACTIVITY_CONTROL_MISSING','COVER_READBACK_FAILED','VISIBILITY_MISSING','READBACK_MISMATCH','PARTITION_MISMATCH','COVER_SAVE_FAILED','COVER_DIALOG_MISSING','COVER_INPUT_MISSING','COVER_NOT_LOADED','COVER_VERIFICATION_REQUIRED','COLLECTION_MISMATCH','TAG_REJECTED','UPLOAD_WIDGET_STALLED'}
     if result.get('ok') is True and result.get('state')=='unknown' and observed.get('submit_started') is False and retryable:
         state.update(state='failed',reconciled_at=now(),safe_retry_evidence={'creator_recheck':'no confirmed association with a published archive','submit_started':False,'returned_field_error':field_error})
         write(path,state)

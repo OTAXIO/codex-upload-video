@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {S,applyFields,waitUpload,submitOnce,pause,fault} from './forms.mjs';
+import {S,applyFields,waitUpload,submitOnce,pause,fault,uploadEntryUrl} from './forms.mjs';
+import {coverDiagnostics} from './cover_editor.mjs';
 
 const job=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
 const imported=job.runtime.puppeteer_module ? await import(pathToFileURL(job.runtime.puppeteer_module).href) : await import('puppeteer-core');
@@ -74,7 +75,7 @@ async function run(browser,page){
       const matches=catalog.filter(x=>!x.is_pay&&(wanted.collection.id?String(x.id)===String(wanted.collection.id):x.name===wanted.collection.name));
       if(!matches.length||(matches.length>1&&matches.filter(x=>x.episodes>0).length!==1))fail('COLLECTION_AMBIGUOUS','Resolve the existing collection before uploading any file');
     }
-    let url=UPLOAD;let target=null;
+    let url=uploadEntryUrl(wanted.activity);let target=null;
     if(job.mode==='edit'){
       const info=await videoInfo(browser,meta.target);
       if(info.code!==0||String(info.owner_mid)!==String(who.mid))fail('TARGET_NOT_FOUND','Cannot verify ownership of the explicit edit target');
@@ -91,8 +92,8 @@ async function run(browser,page){
     }
     await page.waitForSelector(S.title,{visible:true,timeout:60000});
     // Close only the known upload-notification popup; all unknown dialogs stop.
-    const fields=await applyFields(page,wanted,catalog);
     const media=job.mode==='publish'?await waitUpload(page):{existing_video:true};
+    const fields=await applyFields(page,wanted,catalog);
     const receipt=await submitOnce(page,job,target);
     return {ok:true,state:'submitted',account:who,receipt,fields,media,platform_review_pending:true};
   }
@@ -151,7 +152,7 @@ try{
   process.stdout.write(JSON.stringify(result)+'\n');
 }catch(error){
   if(browser&&job.output&&['publish','edit'].includes(job.mode)){
-    try{const page=(await browser.pages())[0];const ui=await page.evaluate(()=>({partition:document.querySelector('.video-human-type')?.outerHTML,covers:[...document.querySelectorAll('.cover-module,.bcc-dialog')].filter(e=>e.getClientRects().length).map(e=>({text:e.innerText.slice(0,3500),html:e.outerHTML.slice(0,18000)}))}));fs.writeFileSync(job.output+'.ui.json',JSON.stringify(ui,null,2));await page.screenshot({path:job.output+'.png'});}catch{}
+    try{const page=(await browser.pages())[0];const ui={partition:await page.$eval('.video-human-type .select-item-cont',e=>e.innerText).catch(()=>null),covers:await coverDiagnostics(page),cover_trace:error.details?.cover_trace??[]};fs.writeFileSync(job.output+'.ui.json',JSON.stringify(ui,null,2));await page.screenshot({path:job.output+'.png'});}catch{}
   }
   const result={ok:false,error:{code:error.code??(error.name==='TimeoutError'?'TIMEOUT':'BACKEND_ERROR'),message:error.code?error.message:'Browser operation failed; inspect local diagnostics without exposing credentials.',...(error.details?{details:error.details}:{})}};
   if(job.output)fs.writeFileSync(job.output,JSON.stringify(result,null,2));

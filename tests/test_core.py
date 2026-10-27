@@ -44,6 +44,14 @@ class CoreChecks(unittest.TestCase):
         self.assertEqual(meta['covers']['four_three']['path'],'cover-4x3.png')
         self.assertTrue(meta['declarations']['ai_generated']);self.assertTrue(meta['declarations']['original']);self.assertTrue(meta['declarations']['no_reprint'])
         self.assertEqual(u.plan(manifest,self.home)['network_calls'],0)
+    def test_claude_tag_is_excluded_from_future_uploads(self):
+        directory,manifest=self.release();pub=u.read(directory/'publication.json')
+        pub['tags']=['AI','Claude','claude','#Claude','新闻'];u.write(directory/'publication.json',pub)
+        u.from_release(directory,self.home);meta=u.read(manifest)
+        self.assertEqual(meta['tags'],['AI','新闻'])
+        self.assertNotIn('Claude',u.tags_for({'scenes':[{'title':'Claude news'}]},'Claude update'))
+        meta['tags']=['AI','CLAUDE']
+        self.assertCode('EXCLUDED_TAG',lambda:u.validate_meta(meta,directory))
     def test_published_release_and_corrupt_hash_stop_before_network(self):
         directory,manifest=self.release();receipt=u.read(directory/'release.json');receipt['published']=True;u.write(directory/'release.json',receipt)
         self.assertCode('ALREADY_PUBLISHED',lambda:u.from_release(directory,self.home))
@@ -77,6 +85,51 @@ class CoreChecks(unittest.TestCase):
         _,first=self.release('edition-a','stable-reset');_,second=self.release('edition-b','stable-reset')
         with patch.object(u,'backend',return_value=dict(ok=True,state='submitted',receipt=dict(aid=123))):u.execute(first,self.home,True)
         self.assertCode('DUPLICATE_EDITION',lambda:u.execute(second,self.home,True))
+    def test_upload_widget_retry_requires_pre_submit_marker_and_creator_recheck(self):
+        directory,manifest=self.release()
+        key=u.read(manifest)['video']['sha256']
+        ledger=self.home/'state'/(key+'.json')
+        progress=self.home/'state'/(key+'.progress.json')
+        base=dict(key=key,operation='upload',state='unknown',manifest=str(manifest),started_at=u.now(),result=dict(ok=False,error=dict(code='UPLOAD_WIDGET_STALLED')))
+        for marker,expected in [(None,'unknown'),(True,'unknown'),(False,'failed')]:
+            u.write(ledger,base)
+            if marker is None:progress.unlink(missing_ok=True)
+            else:u.write(progress,dict(video_selected=True,submit_started=marker))
+            with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):
+                result=u.reconcile(key,self.home)
+            self.assertEqual(result['state'],expected)
+        u.write(ledger,base);u.write(progress,dict(video_selected=True,submit_started=False))
+        with patch.object(u,'backend',return_value=dict(ok=False,error=dict(code='NEED_LOGIN'))):
+            result=u.reconcile(key,self.home)
+        self.assertFalse(result['ok']);self.assertEqual(u.read(ledger)['state'],'unknown')
+    def test_tag_failure_retry_requires_pre_submit_marker_and_creator_recheck(self):
+        directory,manifest=self.release()
+        key=u.read(manifest)['video']['sha256']
+        ledger=self.home/'state'/(key+'.json')
+        progress=self.home/'state'/(key+'.progress.json')
+        base=dict(key=key,operation='upload',state='unknown',manifest=str(manifest),started_at=u.now(),result=dict(ok=False,error=dict(code='TAG_REJECTED')))
+        for marker,expected in [(None,'unknown'),(True,'unknown'),(False,'failed')]:
+            u.write(ledger,base)
+            if marker is None:progress.unlink(missing_ok=True)
+            else:u.write(progress,dict(video_selected=True,submit_started=marker))
+            with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):
+                result=u.reconcile(key,self.home)
+            self.assertEqual(result['state'],expected)
+        u.write(ledger,base);u.write(progress,dict(video_selected=True,submit_started=False))
+        with patch.object(u,'backend',return_value=dict(ok=False,error=dict(code='NEED_LOGIN'))):
+            result=u.reconcile(key,self.home)
+        self.assertFalse(result['ok']);self.assertEqual(u.read(ledger)['state'],'unknown')
+    def test_explicit_correction_only_supersedes_the_authorized_bv(self):
+        _,first=self.release('original','same-event');directory,second=self.release('corrected','same-event')
+        bv='BV1aaaaaaaaa'
+        with patch.object(u,'backend',return_value=dict(ok=True,state='submitted',receipt=dict(aid=123,bvid=bv))):u.execute(first,self.home,True)
+        meta=u.read(second);meta['replacement']=dict(authorized=True,bvid='BV1bbbbbbbbb',reason='User requested correction of broken audio and subtitles');u.write(second,meta)
+        self.assertCode('DUPLICATE_EDITION',lambda:u.execute(second,self.home,True))
+        meta['replacement']['bvid']=bv;u.write(second,meta)
+        with patch.object(u,'backend',return_value=dict(ok=True,state='submitted',receipt=dict(aid=124,bvid='BV1ccccccccc'))) as backend:
+            self.assertEqual(u.execute(second,self.home,True)['state'],'submitted');self.assertEqual(backend.call_count,1)
+        third_dir,third=self.release('duplicate-correction','same-event');third_meta=u.read(third);third_meta['replacement']=meta['replacement'];u.write(third,third_meta)
+        self.assertCode('DUPLICATE_EDITION',lambda:u.execute(third,self.home,True))
     def test_paths_cannot_smuggle_assets_outside_release(self):
         directory,manifest=self.release();outside=self.root/'outside.mp4';outside.write_bytes(b'not authorized')
         meta=u.read(manifest);meta['video'].update(path=str(outside),sha256=u.digest(outside));u.write(manifest,meta)
