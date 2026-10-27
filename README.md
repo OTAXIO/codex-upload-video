@@ -32,6 +32,11 @@ node --test tests/forms.test.mjs
 
 Node DOM 测试需要设置 CUP_BROWSER=Chrome 路径；可选 CUP_PUPPETEER_MODULE 指向已有包入口，否则使用 npm 安装的依赖。该测试启动未登录的隔离浏览器，拦截所有网络，模拟平台回执，不向 B 站发稿。未设置 CUP_BROWSER 时会明确跳过 DOM 测试，不能将此视作端到端通过。
 
-当前状态：本机真实账号登录、投稿/编辑表单和合集已做只读核查；离线浏览器验证了双封面、多选声明、动态标签、活动、重名合集和最终提交回执。真实新视频的完整投稿尚未实测，没有重复上传已有视频进行验证。
+当前状态：Chrome对真实新视频已完成自动提交与公开发布核验；隔离浏览器测试覆盖双封面、声明、标签、活动、重名合集及提交回执。Edge未验证，不使用已发布稿件做二次公开测试。
 
 参考 [biliup/biliup](https://github.com/biliup/biliup) 与 [grapeot/bilibili-upload-skill](https://github.com/grapeot/bilibili-upload-skill)，归属及边界见 NOTICE。实现独立，不调用或绕过后者的人工提交守卫。
+
+
+## 2026-10-27 实操更新
+
+Chrome已经对真实新稿完成自动上传、双封面、科技数码、News、标签、AI/原创多选声明、相关免费活动、最终提交与公开发布核验。Edge未验证。新稿空封面入口与异步渲染已兼容；封面用实际画布像素读回，隐藏设置读真实checked值。表单内有限重试不重新选视频，unknown仍回查而非盲目重投。详细约束见skill及references/contract.md。更新没有修改任何旧公开稿件，也不包含账号或浏览器数据。

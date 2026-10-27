@@ -1,3 +1,4 @@
+import {sameCoverPixels} from '../codex-upload/scripts/forms.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -36,16 +37,56 @@ test('offline browser: two covers, duplicate collection names, tags, declaration
     });
     await page.goto(pathToFileURL(fileURLToPath(new URL('./fixtures/form.html',import.meta.url))).href);
     const wanted={title:'Offline title',description:'First line\nSecond line',declarations:{original:true,ai_generated:true,no_reprint:true},partition:'科技数码',tags:['AI','OpenAI'],activity:{strategy:'relevant_popular_free',keywords:['AI','科技']},collection:{name:'News',id:12,required:true},visibility:'public',covers:{four_three:{path:a,sha256:'test-a'},sixteen_nine:{path:b,sha256:'test-b'}}};
+    await page.$eval('.setting',e=>e.style.display='none');
+    // Reproduce production: the platform auto-opened the cover editor before metadata.
+    await page.evaluate(()=>{
+      showCover();
+      const open=showCover;window.showCover=()=>setTimeout(open,800);
+      window.collectionClicks=0;
+      document.querySelectorAll('.season-item').forEach(e=>e.addEventListener('click',()=>window.collectionClicks++));
+      // Classification updates late after saving covers. Repair only partition.
+      const done=[...document.querySelectorAll('#cover-dialog button')].find(e=>e.innerText==='完成');
+      done.addEventListener('click',()=>{if(!window.lostPartition){window.lostPartition=true;document.querySelector('.select-item-cont').textContent='知识';}});
+    });
     const fields=await applyFields(page,wanted,[{id:11,name:'News',episodes:1},{id:12,name:'News',episodes:0},{id:13,name:'Other',episodes:3}]);
     assert.equal(fields.collection.id,12);assert.equal(await page.evaluate(()=>window.chosenCollectionIndex),1);
     assert.equal(fields.activity.name,'科技猎手');assert.equal(fields.readback.declarations.ai_generated,true);assert.equal(fields.readback.declarations.no_reprint,true);
     assert.equal(fields.covers.four_three.persisted,true);assert.equal(fields.covers.sixteen_nine.persisted,true);
+    assert.equal(await page.evaluate(()=>window.collectionClicks),1,'late partition repair must not replay collection');
+    // Unknown dialogs still block; no blind confirmation of arbitrary popups.
+    await page.evaluate(()=>{const d=document.createElement('div');d.className='bcc-dialog';d.id='unknown';d.innerText='请支付推广费用';document.body.append(d)});
+    await assert.rejects(applyFields(page,{title:'must stop'},[]),e=>e.code==='UNKNOWN_DIALOG');
+    await page.$eval('#unknown',e=>e.remove());
+    const repeat=await applyFields(page,{collection:wanted.collection},[{id:11,name:'News',episodes:1},{id:12,name:'News',episodes:0},{id:13,name:'Other',episodes:3}]);
+    assert.equal(repeat.collection.id,12);assert.equal(await page.evaluate(()=>window.chosenCollectionIndex),1);
     await waitUpload(page,1000);
     const progress=path.join(temporary,'progress.json');const receipt=await submitOnce(page,{mode:'publish',progress});
     assert.equal(receipt.aid,123);assert.equal(submits,1);assert.equal(unexpectedNetwork,0);assert.equal(JSON.parse(fs.readFileSync(progress)).submit_started,true);
+    await assert.rejects(submitOnce(page,{mode:'publish',progress}),e=>e.code==='RECONCILE_REQUIRED');assert.equal(submits,1);
     const edited=await applyFields(page,{title:'Edited offline title'},[]);
     assert.equal(edited.readback.title,'Edited offline title');assert.deepEqual(edited.readback.tags,fields.readback.tags);assert.deepEqual(edited.readback.declarations,fields.readback.declarations);
     await page.$eval('.creation-statement-container .bcc-select',e=>e.classList.add('disabled'));
     await assert.rejects(applyFields(page,{declarations:{original:true,ai_generated:false,no_reprint:true}},[]),e=>e.code==='DECLARATION_IMMUTABLE');
+    const fixed={strategy:'explicit',id:1325166,name:'明日方舟终末地创作者应援计划'};
+    const switched=await applyFields(page,{activity:fixed},[]);
+    assert.deepEqual(switched.readback.activity_tags,[fixed.name]);assert.ok(!switched.readback.tags.includes('科技猎手'));
+    const again=await applyFields(page,{activity:fixed},[]);assert.deepEqual(again.readback.activity_tags,[fixed.name]);
+    await assert.rejects(applyFields(page,{activity:{strategy:'explicit',id:999999,name:'未识别的普通标签'}},[]),e=>e.code==='ACTIVITY_NOT_AVAILABLE');
+    assert.equal(submits,1,'unrecognized activity must never submit or silently substitute another activity');
+
   }finally{await browser.close();if(path.resolve(temporary).startsWith(path.resolve(os.tmpdir())+path.sep+'codex-upload-test-'))fs.rmSync(temporary,{recursive:true,force:true});}
+});
+
+test('cover readback compares pixels and rejects changed aspect/content',()=>{
+ const a={pixels:[255,255,255,255,0,0,0,255],width:2,height:1};
+ assert.ok(sameCoverPixels(a,{...a,pixels:[252,253,254,255,1,1,1,255]}));
+ assert.equal(sameCoverPixels(a,{...a,pixels:[0,0,255,255,255,0,0,255]}),false);
+ assert.equal(sameCoverPixels(a,{...a,width:1,height:2}),false);
+});
+
+test('explicit activity requires exact ID and name and never popularity fallback',()=>{
+ const row={id:1325166,name:'明日方舟终末地创作者应援计划',views:1,index:0};
+ assert.equal(chooseActivity([row,{id:3447,name:'科技猎手',views:1e12,index:1}],{strategy:'explicit',id:1325166,name:row.name}).id,1325166);
+ assert.throws(()=>chooseActivity([row],{strategy:'explicit',id:1325166,name:'错误名称'}),e=>e.code==='ACTIVITY_NOT_AVAILABLE');
+ assert.throws(()=>chooseActivity([{...row,disabled:true}],{strategy:'explicit',id:1325166,name:row.name}),e=>e.code==='ACTIVITY_NOT_AVAILABLE');
 });

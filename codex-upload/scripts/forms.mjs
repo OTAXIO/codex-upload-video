@@ -8,7 +8,7 @@ export const S={title:'.video-title input.input-val',description:'.desc-containe
   partitionTrigger:'.video-human-type .select-controller',partitionOption:'.video-human-type .item-cont-main',
   tagInput:'.tag-container .tag-input-wrp input.input-val',tags:'.tag-container .label-item-v2-container',
   topics:'.tag-topic-list > span',collection:'.video-season .season-enter',collectionOption:'.season-dropdown .season-item',
-  upload:'.file-list-v2-item, .file-item',submit:'.submit-container .submit-add',cover:'.cover-module .cover-img'};
+  upload:'.file-list-v2-item, .file-item',submit:'.submit-container .submit-add',cover:'.cover-module-main .cover-slot, .cover-module .cover-img'};
 export const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 export function fault(code,message,details={}){throw Object.assign(new Error(message),{code,details});}
 export const norm=s=>(s??'').replace(/\r/g,'').replace(/\n+/g,'\n').trim();
@@ -18,7 +18,7 @@ export function chooseActivity(rows,policy){
   const words=policy.keywords??['AI','科技'];
   const candidates=rows.filter(x=>!x.disabled&&!x.paid&&!/付费|充值|推广购买|广告投放/.test(x.name));
   if(policy.strategy==='explicit'){
-    const chosen=candidates.filter(x=>String(x.id)===String(policy.id));
+    const chosen=candidates.filter(x=>String(x.id)===String(policy.id)&&(!policy.name||x.name===policy.name));
     if(chosen.length!==1)fault('ACTIVITY_NOT_AVAILABLE','The specified activity is not eligible');return chosen[0];
   }
   const relevant=candidates.filter(x=>words.some(w=>x.name.toLowerCase().includes(w.toLowerCase())));
@@ -43,6 +43,7 @@ export async function visible(page,css,required=true){
   if(required)fault('SELECTOR_MISSING','Required visible control is missing',{selector:css});return null;
 }
 export async function exactText(page,text,scope='body',required=true){
+  if(required){try{await page.waitForFunction((scope,text)=>{const root=[...document.querySelectorAll(scope)].find(e=>e.getClientRects().length);if(!root)return false;let all=[...root.querySelectorAll('button,span,div,p,li,label')].filter(e=>e.getClientRects().length&&e.innerText.trim()===text);all=all.filter(e=>!all.some(other=>other!==e&&e.contains(other)));return all.length===1;},{timeout:5000},scope,text);}catch{}}
   const handle=await page.evaluateHandle((scope,text)=>{
     const root=[...document.querySelectorAll(scope)].find(e=>e.getClientRects().length);if(!root)return null;
     let all=[...root.querySelectorAll('button,span,div,p,li,label')].filter(e=>e.getClientRects().length&&e.innerText.trim()===text);
@@ -56,11 +57,24 @@ export async function textInput(page,css,value){
   const control=process.platform==='darwin'?'Meta':'Control';await page.keyboard.down(control);await page.keyboard.press('KeyA');await page.keyboard.up(control);
   await page.keyboard.press('Backspace');await page.keyboard.sendCharacter(value);await element.evaluate(e=>e.dispatchEvent(new Event('change',{bubbles:true})));
 }
+async function isCoverEditor(dialog){
+  // Require the known dual-slot image editor, not an arbitrary matching title.
+  const text=await dialog.evaluate(e=>e.innerText);
+  return text.includes('封面制作')&&text.includes('首页推荐封面（4:3）')&&text.includes('个人空间封面（16:9）')&&!!await dialog.$('input[type=file][accept*=image]');
+}
 export async function dismissKnown(page){
   for(const dialog of await page.$$('.bcc-dialog'))if(await dialog.isVisible()){
     const text=await dialog.evaluate(e=>e.innerText);
     if(text.includes('开启后视频上传完成第一时间通知')){const close=await dialog.$('.bcc-dialog__close');if(close){await close.click();continue;}}
-    fault('UNKNOWN_DIALOG','A dialog requires a supported handling rule; no blind confirmation',{dialog_text:text.slice(0,100)});
+    if(await isCoverEditor(dialog)){
+      const close=await dialog.$('.bcc-dialog__close');
+      if(!close)fault('COVER_CONTROL_MISSING','Known cover editor has no safe close control');
+      // Cancel an auto-open/stale editor; covers() later loads both final assets.
+      await close.click();
+      try{await page.waitForFunction(e=>!e.getClientRects().length,{timeout:5000},dialog);}catch{fault('COVER_SAVE_FAILED','Known cover editor did not close');}
+      continue;
+    }
+    fault('UNKNOWN_DIALOG' ,'A dialog requires a supported handling rule; no blind confirmation',{dialog_text:text.slice(0,100)});
   }
 }
 export async function platformCheck(page){
@@ -78,7 +92,7 @@ export async function readForm(page){
       tags:chips.map(e=>e.querySelector('.label-item-v2-content')?.innerText.trim()??e.innerText.trim()),
       activity_tags:chips.filter(e=>e.querySelector('.topic-icon')).map(e=>e.querySelector('.label-item-v2-content')?.innerText.trim()??e.innerText.trim()),
       collection_name:get('.video-season .season-enter-text')?.getAttribute('title')??get('.video-season .season-enter-text-name')?.innerText.trim()??null,
-      visibility:get('.check-radio-v2-box-checked + .check-radio-v2-name')?.innerText.trim()??null};
+      visibility:document.querySelector('.check-radio-v2-box-checked + .check-radio-v2-name')?.textContent.trim()??null};
   },S);
 }
 async function declarations(page,wanted){
@@ -88,35 +102,58 @@ async function declarations(page,wanted){
   if(disabled)fault('DECLARATION_IMMUTABLE','Platform does not allow changing this submitted declaration');
   await (await visible(page,S.statementTrigger)).click();
   const primary=wanted.ai_generated?'含AI生成内容':wanted.original?'内容无需标注':'内容为转载';
-  const option=await exactText(page,primary,'.creation-statement-container');await option.click();
+  const option=await exactText(page,primary,'.creation-statement-container');await option.click();await pause(350);
   actual=await readForm(page);
   if(actual.declarations.no_reprint!==wanted.no_reprint){
     if(!await visible(page,'.creation-statement-container .auth-content',false))await (await visible(page,S.statementTrigger)).click();
-    await (await visible(page,'.creation-statement-container .auth-content')).click();
+    await page.waitForSelector('.creation-statement-container .auth-content',{visible:true,timeout:5000});
+    await (await visible(page,'.creation-statement-container .auth-content')).click();await pause(250);
   }
   const list=await visible(page,'.creation-statement-container .bcc-select-list-wrap',false);
   if(list)await (await visible(page,S.statementTrigger)).click();
 }
 async function partition(page,name){
-  if((await readForm(page)).partition===name)return;
-  await (await visible(page,S.partitionTrigger)).click();
-  await (await exactText(page,name,'.video-human-type')).click();
+  // Upload classification and declaration popovers may redraw/close this menu.
+  await pause(600);
+  for(let attempt=0;attempt<2;attempt++){
+    if((await readForm(page)).partition===name)return;
+    await (await visible(page,S.partitionTrigger)).click();await pause(350);
+    let option=null;
+    for(let tick=0;tick<12&&!option;tick++){option=await exactText(page,name,'.video-human-type',false);if(!option)await pause(250);}
+    if(option){await option.click();await pause(400);if((await readForm(page)).partition===name)return;}
+  }
+  fault('PARTITION_MISMATCH','Requested partition did not remain selected',{partition:name});
 }
+
 export async function topicRows(page){
   return await page.$$eval(S.topics,els=>els.filter(e=>e.getClientRects().length).map((e,index)=>({index,id:e.getAttribute('v-model'),name:e.querySelector('.hot-tag-item>span')?.innerText.trim()??'',raw_views:e.querySelector('.des')?.textContent??'',selected:!!e.querySelector('.hot-tag-container-selected'),disabled:!!e.querySelector('.is-disabled,[disabled]'),paid:/付费|充值/.test(e.innerText)})));
 }
 async function activity(page,policy){
   const rows=(await topicRows(page)).map(x=>({...x,views:popularity(x.raw_views)}));
   if(!await page.$('.tag-topic-list'))fault('ACTIVITY_CONTROL_MISSING','Cannot inspect activity eligibility');
-  const chosen=chooseActivity(rows,policy);
-  for(const row of rows.filter(x=>x.selected&&x.id!==chosen?.id)){
+  const missingExplicit=policy.strategy==='explicit'&&policy.name&&!rows.some(x=>String(x.id)===String(policy.id)||x.name===policy.name);
+  const chosen=missingExplicit?{id:String(policy.id),name:policy.name,selected:false,views:null}:chooseActivity(rows,policy);
+  for(const row of rows.filter(x=>x.selected&&String(x.id)!==String(chosen?.id))){
     const h=await page.$(`${S.topics}[v-model="${row.id}"] .hot-tag-container`);if(!h)fault('ACTIVITY_MISMATCH','Selected topic cannot be changed safely');await h.click();
   }
   if(chosen&&!chosen.selected){
-    if(!/^\d+$/.test(chosen.id??''))fault('ACTIVITY_ID_MISSING','Activity has no stable platform identifier');
-    await (await visible(page,`${S.topics}[v-model="${chosen.id}"] .hot-tag-container`)).click();
+    if(!/^\d+$/.test(String(chosen.id??'')))fault('ACTIVITY_ID_MISSING','Activity has no stable platform identifier');
+    if(missingExplicit){
+      // The creator UI says “use the activity tag to participate”. An explicit
+      // event need not appear in the six recommendations. Enter its EXACT tag;
+      // only a real platform topic-icon counts, never an ordinary text tag.
+      const current=await readForm(page);
+      if(!current.activity_tags.includes(chosen.name))await tags(page,[...current.tags.filter(t=>!current.activity_tags.includes(t)),chosen.name]);
+      for(let tick=0;tick<20;tick++){
+        if((await readForm(page)).activity_tags.includes(chosen.name))break;
+        await pause(250);
+      }
+    }else await (await visible(page,`${S.topics}[v-model="${chosen.id}"] .hot-tag-container`)).click();
   }
-  return chosen?{...chosen,popularity_evidence:chosen.views===null?'platform_recommendation_order':'platform_displayed_views'}:null;
+  const actual=await readForm(page);
+  if(chosen&&!actual.activity_tags.includes(chosen.name))fault('ACTIVITY_NOT_AVAILABLE','Requested activity was not recognized by the platform; do not substitute another event',{name:chosen.name});
+  if(policy.strategy==='explicit'&&actual.activity_tags.some(name=>name!==chosen.name))fault('ACTIVITY_MISMATCH','Another activity is still selected; do not submit');
+  return chosen?{...chosen,verification:missingExplicit?'exact_tag_and_platform_topic_icon':'recommended_topic_and_readback',popularity_evidence:chosen.views===null?'explicit_user_selection':'platform_displayed_views'}:null;
 }
 async function tags(page,wanted){
   for(let round=0;round<15;round++){
@@ -150,12 +187,42 @@ export async function collection(page,wanted,catalog){
   if(rows.length!==catalog.length||rows.some((name,i)=>name!==catalog[i].name))fault('COLLECTION_ORDER_MISMATCH','Cannot safely map dropdown to authenticated collection IDs');
   const index=catalog.findIndex(x=>x.id===chosen.id);const options=await page.$$(S.collectionOption);const visibleOptions=[];
   for(const e of options)if(await e.isVisible())visibleOptions.push(e);
-  await visibleOptions[index].click();await pause(300);
+  await visibleOptions[index].click();await pause(750);
+  // A recovered/auto-filled form may already have this row selected. Bilibili
+  // toggles it OFF on click. Reopen and select the SAME catalog-mapped row once.
+  if((await readForm(page)).collection_name!==chosen.name){
+    await (await visible(page,S.collection)).click();
+    await page.waitForSelector('.season-dropdown',{visible:true,timeout:5000});
+    const retryRows=[];
+    for(const e of await page.$$(S.collectionOption))if(await e.isVisible())retryRows.push(e);
+    const names=await Promise.all(retryRows.map(e=>e.evaluate(e=>e.querySelector('.season-item-title')?.innerText.trim()??e.innerText.trim())));
+    if(names.length!==catalog.length||names.some((name,i)=>name!==catalog[i].name))fault('COLLECTION_ORDER_MISMATCH','Collection list changed during same-form recovery');
+    await retryRows[index].click();await pause(750);
+  }
   const current=await readForm(page);if(current.collection_name!==chosen.name)fault('COLLECTION_MISMATCH','Collection readback differs');
   return {id:chosen.id,name:chosen.name,basis:'complete_catalog_order_and_name_readback'};
 }
+async function coverPixels(dialog,index){
+  return await dialog.evaluate((root,index)=>{
+    const canvases=[...root.querySelectorAll('canvas.lower-canvas')];
+    let image=canvases[index];
+    if(!image){const imgs=[...root.querySelectorAll('img')].filter(i=>i.getClientRects().length&&i.naturalWidth>0);imgs.sort((a,b)=>b.getBoundingClientRect().width*b.getBoundingClientRect().height-a.getBoundingClientRect().width*a.getBoundingClientRect().height);image=imgs[0];}
+    if(!image)return null;
+    const c=document.createElement('canvas');c.width=64;c.height=64;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,64,64);ctx.drawImage(image,0,0,64,64);
+    return {pixels:Array.from(ctx.getImageData(0,0,64,64).data),width:image.width,height:image.height,kind:canvases.length?'rendered_canvas':'image'};
+  },index);
+}
+export function sameCoverPixels(a,b){
+  if(!a||!b||a.pixels.length!==b.pixels.length||a.width!==b.width||a.height!==b.height)return false;
+  let total=0;for(let i=0;i<a.pixels.length;i++)total+=Math.abs(a.pixels[i]-b.pixels[i]);
+  return total/a.pixels.length<=8;
+}
+async function waitCoverEditor(page){
+  try{await page.waitForFunction(()=>[...document.querySelectorAll('.bcc-dialog')].some(e=>e.getClientRects().length&&e.innerText.includes('封面制作')&&e.querySelector('input[type=file][accept*=image]')),{timeout:10000});}
+  catch{fault('COVER_DIALOG_MISSING','Dual-cover editor did not mount before deadline');}
+}
 async function covers(page,wanted){
-  await (await visible(page,S.cover)).click();await pause(400);
+  await (await visible(page,S.cover)).click();await waitCoverEditor(page);
   const dialogs=[];for(const e of await page.$$('.bcc-dialog'))if(await e.isVisible()&&(await e.evaluate(e=>e.innerText)).includes('封面制作'))dialogs.push(e);
   if(dialogs.length!==1)fault('COVER_DIALOG_MISSING','Cannot locate the unique dual-cover editor');
   const dialog=dialogs[0];await dialog.evaluate(e=>e.setAttribute('data-codex-cover-dialog','true'));
@@ -164,62 +231,85 @@ async function covers(page,wanted){
     await (await exactText(page,label,scope)).click();await pause(250);
     const input=await dialog.$('input[type=file][accept*=image]');if(!input)fault('COVER_INPUT_MISSING','Cover image input is missing');
     await input.uploadFile(wanted[name].path);await pause(2200);
-    recorded[name]=await dialog.evaluate(e=>{const imgs=[...e.querySelectorAll('img')].filter(i=>i.getClientRects().length&&i.naturalWidth>0);imgs.sort((a,b)=>b.getBoundingClientRect().width*b.getBoundingClientRect().height-a.getBoundingClientRect().width*a.getBoundingClientRect().height);return imgs[0]?.currentSrc||imgs[0]?.src||null;});
+    recorded[name]=await coverPixels(dialog,name==='four_three'?0:1);
     if(!recorded[name])fault('COVER_NOT_LOADED','Uploaded cover is not visible in its slot');
   }
   await (await exactText(page,'完成',scope)).click();await pause(500);
-  if(await visible(page,scope,false))fault('COVER_SAVE_FAILED','Cover editor did not close');
-  await (await visible(page,S.cover)).click();await pause(350);
+  try{await page.waitForSelector(scope,{hidden:true,timeout:30000});}catch{fault('COVER_SAVE_FAILED','Cover editor did not finish saving');}
+  await (await visible(page,S.cover)).click();await waitCoverEditor(page);
   let checkDialog=null;for(const e of await page.$$('.bcc-dialog'))if(await e.isVisible()&&(await e.evaluate(e=>e.innerText)).includes('封面制作'))checkDialog=e;
   if(!checkDialog)fault('COVER_READBACK_FAILED','Cannot reopen saved covers');
   await checkDialog.evaluate(e=>e.setAttribute('data-codex-cover-dialog','true'));
   for(const [name,label] of [['four_three','首页推荐封面（4:3）'],['sixteen_nine','个人空间封面（16:9）']]){
     await (await exactText(page,label,scope)).click();await pause(200);
-    const src=await checkDialog.evaluate(e=>{const a=[...e.querySelectorAll('img')].filter(i=>i.getClientRects().length&&i.naturalWidth>0);a.sort((x,y)=>y.getBoundingClientRect().width*y.getBoundingClientRect().height-x.getBoundingClientRect().width*x.getBoundingClientRect().height);return a[0]?.currentSrc||a[0]?.src||null;});
-    if(src!==recorded[name])fault('COVER_READBACK_FAILED','A saved cover slot differs from the uploaded image',{slot:name});
+    const actual=await coverPixels(checkDialog,name==='four_three'?0:1);
+    if(!sameCoverPixels(actual,recorded[name]))fault('COVER_READBACK_FAILED','Saved cover pixels differ from the uploaded slot',{slot:name});
   }
-  const close=await checkDialog.$('.bcc-dialog__close');if(close)await close.click();else await (await exactText(page,'完成',scope)).click();
-  return {four_three:{sha256:wanted.four_three.sha256,slot_loaded:true,persisted:true},sixteen_nine:{sha256:wanted.sixteen_nine.sha256,slot_loaded:true,persisted:true}};
+  const close=await checkDialog.$('.bcc-dialog__close');if(close)await close.click();else await (await exactText(page,'完成',scope)).click();await pause(350);
+  return {four_three:{sha256:wanted.four_three.sha256,slot_loaded:true,persisted:true,verification:'rendered_pixels'},sixteen_nine:{sha256:wanted.sixteen_nine.sha256,slot_loaded:true,persisted:true,verification:'rendered_pixels'}};
 }
 async function visibility(page,wanted){
-  if((await readForm(page)).visibility===null){
+  const desiredLabel=wanted==='public'?'公开可见':'仅自己可见';
+  if((await readForm(page)).visibility===desiredLabel)return;
+  if(!await visible(page,'.setting',false)){
     const toggle=await exactText(page,'更多设置 （含声明与权益、视频元素、互动管理等）','body',false);
     if(toggle)await toggle.click();else{
       for(const e of await page.$$('span.label'))if((await e.evaluate(e=>e.innerText)).includes('更多设置')){await e.click();break;}
     }
   }
+  await pause(400);
   const label=wanted==='public'?'公开可见':'仅自己可见';
-  const option=await exactText(page,label,'.setting',false);
-  if(!option){if((await readForm(page)).visibility!==wanted)fault('VISIBILITY_MISSING','Cannot verify requested visibility');return;}
-  await option.click();
+  const option=await exactText(page,label,'.setting',true);
+  if(!option){if((await readForm(page)).visibility!==label)fault('VISIBILITY_MISSING','Cannot verify requested visibility');return;}
+  await option.click();await pause(250);
 }
 
 export async function applyFields(page,wanted,catalog){
-  await dismissKnown(page);await platformCheck(page);const before=await readForm(page);const result={};
-  if('title'in wanted)await textInput(page,S.title,wanted.title);
-  if('description'in wanted)await textInput(page,S.description,wanted.description);
-  if('declarations'in wanted)await declarations(page,wanted.declarations);
-  if('partition'in wanted)await partition(page,wanted.partition);
-  if('tags'in wanted)await tags(page,wanted.tags);
-  if('activity'in wanted)result.activity=await activity(page,wanted.activity);
-  if('tags'in wanted)await tags(page,wanted.tags);
-  if('collection'in wanted)result.collection=await collection(page,wanted.collection,catalog);
-  if('covers'in wanted)result.covers=await covers(page,wanted.covers);
-  if('visibility'in wanted)await visibility(page,wanted.visibility);
-  await dismissKnown(page);await platformCheck(page);
-  const after=await readForm(page);
-  // readForm uses UI labels; normalize only this enum.
-  const labelMap={'公开可见':'public','仅自己可见':'self'};after.visibility=labelMap[after.visibility]??after.visibility;
-  const mismatches=compareFields(after,wanted,result.activity);
-  for(const field of ['title','description','partition','tags','declarations','collection_name']){
-    const key=field==='collection_name'?'collection':field;
-    if(field==='tags'&&'activity'in wanted){
-      const a=before.tags.filter(t=>!before.activity_tags.includes(t)),b=after.tags.filter(t=>!after.activity_tags.includes(t));
-      if(!('tags'in wanted)&&JSON.stringify(a)!==JSON.stringify(b))mismatches['unrequested.tags']=true;
-    }else if(!(key in wanted)&&JSON.stringify(before[field])!==JSON.stringify(after[field]))mismatches['unrequested.'+field]=true;
+  await platformCheck(page);await dismissKnown(page);
+  const before=await readForm(page),result={},attempts={};
+  const setters={
+    title:async()=>{if((await readForm(page)).title!==wanted.title)await textInput(page,S.title,wanted.title);},
+    description:async()=>{if(norm((await readForm(page)).description)!==norm(wanted.description))await textInput(page,S.description,wanted.description);},
+    declarations:async()=>declarations(page,wanted.declarations),
+    partition:async()=>partition(page,wanted.partition),
+    tags:async()=>tags(page,wanted.tags),
+    activity:async()=>{result.activity=await activity(page,wanted.activity);},
+    collection:async()=>{result.collection=await collection(page,wanted.collection,catalog);},
+    covers:async()=>{result.covers=await covers(page,wanted.covers);},
+    visibility:async()=>visibility(page,wanted.visibility)
+  };
+  const retryable={partition:['PARTITION_MISMATCH'],collection:['COLLECTION_MISMATCH'],covers:['COVER_DIALOG_MISSING','COVER_READBACK_FAILED','COVER_SAVE_FAILED','COVER_NOT_LOADED']};
+  async function set(field){
+    attempts[field]=(attempts[field]??0)+1;
+    try{await setters[field]();}catch(error){
+      if(attempts[field]>=2||!retryable[field]?.includes(error.code))throw error;
+      await platformCheck(page);await dismissKnown(page);
+      attempts[field]++;await setters[field]();
+    }
   }
-  if(Object.keys(mismatches).length)fault('READBACK_MISMATCH','Final fields differ from the requested metadata',{fields:Object.keys(mismatches)});
-  return {...result,readback:after};
+  // No whole-form replay: a late partition readback must not re-toggle News,
+  // declarations, activity or replace covers that already passed verification.
+  for(const field of ['title','description','declarations','partition','tags','activity','collection','covers','visibility'])if(field in wanted)await set(field);
+  if('tags'in wanted)await tags(page,wanted.tags);
+  let after;
+  for(let check=0;check<2;check++){
+    await platformCheck(page);await dismissKnown(page);after=await readForm(page);
+    after.visibility=({'公开可见':'public','仅自己可见':'self'})[after.visibility]??after.visibility;
+    const mismatches=compareFields(after,wanted,result.activity);
+    for(const field of ['title','description','partition','tags','declarations','collection_name']){
+      const key=field==='collection_name'?'collection':field;
+      if(field==='tags'&&'activity'in wanted){
+        const a=before.tags.filter(t=>!before.activity_tags.includes(t)),b=after.tags.filter(t=>!after.activity_tags.includes(t));
+        if(!('tags'in wanted)&&JSON.stringify(a)!==JSON.stringify(b))mismatches['unrequested.tags']=true;
+      }else if(!(key in wanted)&&JSON.stringify(before[field])!==JSON.stringify(after[field]))mismatches['unrequested.'+field]=true;
+    }
+    const fields=Object.keys(mismatches);
+    if(!fields.length)return {...result,readback:after};
+    const repair=[...new Set(fields.map(x=>x.split('.')[0]))];
+    if(check||repair.some(f=>!(f in wanted)||!setters[f]||(attempts[f]??0)>=2))fault('READBACK_MISMATCH','Final fields differ from requested metadata',{fields});
+    for(const field of repair)await set(field);
+    if('tags'in wanted&&repair.includes('activity'))await tags(page,wanted.tags);
+  }
 }
 export async function waitUpload(page,timeout=1800000){
   const end=Date.now()+timeout;
@@ -234,12 +324,17 @@ export async function waitUpload(page,timeout=1800000){
   }fault('UPLOAD_TIMEOUT','Upload did not complete before deadline; reconcile before retry');
 }
 export async function submitOnce(page,job,target=null){
+  if(job.progress&&fs.existsSync(job.progress)){
+    const previous=JSON.parse(fs.readFileSync(job.progress,'utf8'));
+    if(previous.submit_started)fault('RECONCILE_REQUIRED','Submit was already started for this attempt; do not click again');
+  }
   await platformCheck(page);await dismissKnown(page);
   const button=await visible(page,S.submit);
   if(await button.evaluate(e=>e.classList.contains('disabled')||e.classList.contains('is-disabled')||e.disabled))fault('SUBMIT_DISABLED','Platform has disabled submission');
   let handler;let timeout;
   const response=new Promise((resolve,reject)=>{
     handler=async r=>{try{
+      if(r.request().method()!=='POST')return;
       const url=new URL(r.url());
       if(url.hostname!=='member.bilibili.com'||!/^\/x\/vu\/(?:web|client)\/(?:add|edit)(?:\/v\d+)?$/.test(url.pathname))return;
       const d=await r.json();resolve({code:d.code,message:typeof d.message==='string'?d.message.slice(0,100):'',aid:d.data?.aid??d.data?.archive?.aid??null,bvid:d.data?.bvid??null});

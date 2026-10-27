@@ -28,6 +28,17 @@ class CoreChecks(unittest.TestCase):
         with self.assertRaises(u.UploadError) as e:fn()
         self.assertEqual(e.exception.code,code)
 
+    def test_new_release_uses_fixed_endfield_activity(self):
+        directory,manifest=self.release()
+        activity=u.read(manifest)['activity']
+        self.assertEqual(activity['strategy'],'explicit')
+        self.assertEqual(activity['id'],1325166)
+        self.assertEqual(activity['name'],'明日方舟终末地创作者应援计划')
+        self.assertEqual(activity['fallback'],'stop')
+        pub=u.read(directory/'publication.json');pub['tags'].append('科技猎手');u.write(directory/'publication.json',pub)
+        u.from_release(directory,self.home)
+        self.assertNotIn('科技猎手',u.read(manifest)['tags'])
+
     def test_portable_metadata_and_zero_network_plan(self):
         directory,manifest=self.release();meta=u.read(manifest)
         self.assertEqual(meta['covers']['four_three']['path'],'cover-4x3.png')

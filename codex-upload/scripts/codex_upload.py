@@ -19,6 +19,11 @@ def digest(path):
     with Path(path).open('rb') as f:
         for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
     return h.hexdigest()
+def implementation_fingerprint():
+    files=['scripts/codex_upload.py','scripts/browser.mjs','scripts/forms.mjs']
+    return hashlib.sha256(''.join(f+':'+digest(SKILL/f)+'\n' for f in files).encode()).hexdigest()
+
+
 def problem(code,message,**details):raise UploadError(code,message,**details)
 
 def process_alive(pid):
@@ -101,6 +106,7 @@ def from_release(directory,home,output=None):
     for label,name in [('four_three','cover-4x3.png'),('sixteen_nine','cover-16x9.png')]:
         covers[label]=dict(**file_record(directory/name,directory),width=image_size(directory/name)[0],height=image_size(directory/name)[1])
     tags=pub.get('tags') or tags_for(episode,pub['title']);trimmed=[]
+    tags=[tag for tag in tags if tag not in cfg.get('replaced_activity_tags',[])]
     if cfg['activity'].get('strategy')!='none' and len(tags)>9:
         if cfg.get('tag_strategy')=='agent_then_content_rules' and not pub.get('tags_locked'):
             trimmed=tags[9:];tags=tags[:9]
@@ -215,6 +221,7 @@ def execute(path,home,execute=False):
             if state!=ledger and other.get('state') not in {'failed','ready'} and any(meta.get(k) and meta.get(k)==other.get(k) for k in ['episode_id','alert_id','reset_event_key']):problem('DUPLICATE_EDITION','This episode/reset event already has an upload attempt')
     progress=home/'state'/(key+'.progress.json');state=dict(key=key,operation=operation,episode_id=meta.get('episode_id'),alert_id=meta.get('alert_id'),reset_event_key=meta.get('reset_event_key'),state='starting',started_at=now(),manifest=str(path))
     write(ledger,state)
+    progress.unlink(missing_ok=True)
     try:result=backend(home,'publish' if operation=='upload' else 'edit',meta,path.parent,progress)
     except (UploadError,subprocess.TimeoutExpired,OSError,ValueError) as error:
         observed=read(progress) if progress.exists() else {}
@@ -238,8 +245,20 @@ def reconcile(key,home):
     if state.get('operation')=='edit':
         problem('RECONCILE_REQUIRED','Read the explicit edit target and compare the intended patch; a public title alone cannot verify all edits',target=meta['target'])
     result=backend(home,'reconcile',meta,meta_path.parent,extra=dict(attempt_started_at=state['started_at']))
+    if not result.get('ok'):return result
     if result.get('state')=='published' and result.get('receipt',{}).get('aid'):
         state.update(state='published',receipt=result['receipt'],reconciled_at=now());write(path,state);write(meta_path.parent/'upload.receipt.json',state)
+    # A returned synchronous field error and our own pre-submit marker prove
+    # submitOnce was never entered. Keep an audit record after creator recheck.
+    progress=home/'state'/(key+'.progress.json')
+    observed=read(progress) if progress.exists() else {}
+    field_error=state.get('result',{}).get('error',{}).get('code')
+    details=state.get('result',{}).get('error',{}).get('details',{})
+    cover_dialog=field_error=='UNKNOWN_DIALOG' and details.get('dialog_text','').startswith('封面制作\n')
+    retryable=cover_dialog or field_error in {'SELECTOR_MISSING','AMBIGUOUS_CONTROL','FORM_MISMATCH','COVER_CONTROL_MISSING','COLLECTION_AMBIGUOUS','ACTIVITY_CONTROL_MISSING','COVER_READBACK_FAILED','VISIBILITY_MISSING','READBACK_MISMATCH','PARTITION_MISMATCH','COVER_SAVE_FAILED','COVER_DIALOG_MISSING','COVER_INPUT_MISSING','COVER_NOT_LOADED','COLLECTION_MISMATCH'}
+    if result.get('ok') is True and result.get('state')=='unknown' and observed.get('submit_started') is False and retryable:
+        state.update(state='failed',reconciled_at=now(),safe_retry_evidence={'creator_recheck':'no confirmed association with a published archive','submit_started':False,'returned_field_error':field_error})
+        write(path,state)
     return dict(ok=True,**state)
 
 def main():
@@ -268,6 +287,7 @@ def main():
         else:
             result=backend(home,args.command)
             if args.command=='login' and result.get('ok'):write(home/'account.json',dict(mid=result['account']['mid'],verified_at=now()))
+        if args.command=='doctor':result['implementation_sha256']=implementation_fingerprint()
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0 if result.get('ok',True) else 2
     except UploadError as error:
         print(json.dumps(dict(ok=False,error=dict(code=error.code,message=str(error),**error.details)),ensure_ascii=False,indent=2));return 2

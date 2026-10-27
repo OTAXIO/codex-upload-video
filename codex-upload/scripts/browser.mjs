@@ -150,6 +150,9 @@ try{
   if(job.output)fs.writeFileSync(job.output,JSON.stringify(result,null,2));
   process.stdout.write(JSON.stringify(result)+'\n');
 }catch(error){
+  if(browser&&job.output&&['publish','edit'].includes(job.mode)){
+    try{const page=(await browser.pages())[0];const ui=await page.evaluate(()=>({partition:document.querySelector('.video-human-type')?.outerHTML,covers:[...document.querySelectorAll('.cover-module,.bcc-dialog')].filter(e=>e.getClientRects().length).map(e=>({text:e.innerText.slice(0,3500),html:e.outerHTML.slice(0,18000)}))}));fs.writeFileSync(job.output+'.ui.json',JSON.stringify(ui,null,2));await page.screenshot({path:job.output+'.png'});}catch{}
+  }
   const result={ok:false,error:{code:error.code??(error.name==='TimeoutError'?'TIMEOUT':'BACKEND_ERROR'),message:error.code?error.message:'Browser operation failed; inspect local diagnostics without exposing credentials.',...(error.details?{details:error.details}:{})}};
   if(job.output)fs.writeFileSync(job.output,JSON.stringify(result,null,2));
   process.stdout.write(JSON.stringify(result)+'\n');process.exitCode=1;
