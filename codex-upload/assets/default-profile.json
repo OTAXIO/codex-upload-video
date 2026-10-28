@@ -25,5 +25,23 @@
   "allow_automated_publish": false,
   "replaced_activity_tags": [
     "科技猎手"
-  ]
+  ],
+  "activity_by_slot": {
+    "morning": {
+      "strategy": "explicit",
+      "id": 1325166,
+      "name": "明日方舟终末地创作者应援计划",
+      "required_when_available": true,
+      "fallback": "stop",
+      "source_url": "https://www.bilibili.com/blackboard/era/hProYF7NSH5CPvi7.html"
+    },
+    "night": {
+      "strategy": "explicit",
+      "id": 8314,
+      "name": "明日方舟创作者应援计划",
+      "required_when_available": true,
+      "fallback": "stop",
+      "source_url": "https://www.bilibili.com/blackboard/era/ao3owUS2em2pXhta.html"
+    }
+  }
 }

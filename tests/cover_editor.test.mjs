@@ -26,6 +26,10 @@ async function fixture(options={},run){
     for(const [slot,w,h,offset]of [['four_three',800,600,40],['sixteen_nine',960,540,140]]){
       const data=await page.evaluate(({w,h,offset})=>{const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,w,h);x.fillStyle='#01a1fe';x.fillRect(offset,20,w*.12,h*.45);x.fillStyle='#111';x.font='bold 45px sans-serif';x.fillText('Native cover '+w,40,h*.7);return c.toDataURL('image/png').split(',')[1];},{w,h,offset});
       const file=path.join(tmp,slot+'.png'),bytes=Buffer.from(data,'base64');fs.writeFileSync(file,bytes);wanted[slot]={path:file,sha256:createHash('sha256').update(bytes).digest('hex')};
+      if(options.fineArtwork){
+        const dense=await page.evaluate(({w,h})=>{const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,w,h);x.fillStyle='#111';for(let y=15;y<h-15;y+=3)x.fillRect(15,y,w-30,1);return c.toDataURL('image/png').split(',')[1];},{w,h});
+        const replacement=Buffer.from(dense,'base64');fs.writeFileSync(file,replacement);wanted[slot].sha256=createHash('sha256').update(replacement).digest('hex');
+      }
     }
     await run(page,wanted);assert.deepEqual(network,[],'all external requests are blocked; no platform traffic is permitted');
   }finally{await page.close();}
@@ -52,8 +56,15 @@ test('manual choice may save and close directly without editing a detached dialo
 test('delayed editor, image decode and save are awaited before readback',browserTest,async()=>{
   await fixture({openDelay:350,loadDelay:350,saveDelay:350},async(page,wanted)=>{await covers(page,wanted);assert.equal(await page.evaluate(()=>coverFixture.saves),1);});
 });
+test('visible native shell waits for lazy ratio canvases, including reopen',browserTest,async()=>{
+  await fixture({mountDelay:450},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);assert.equal(await page.evaluate(()=>coverFixture.saves),1);});
+});
+test('fine cover artwork compares through the native raster sampling path',browserTest,async()=>{
+  await fixture({fineArtwork:true},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);});
+});
 for(const [name,options,code]of [
   ['two active upload inputs',{duplicateInput:true},'COVER_INPUT_MISSING'],
+  ['native shell never mounts',{mountDelay:450,neverMount:true},'COVER_DIALOG_MISSING'],
   ['ratio activation ignored',{blockActivation:true},'COVER_INPUT_MISSING'],
   ['unrecognized native structure',{autoOpen:true,unknownContract:true},'UNKNOWN_DIALOG'],
   ['ambiguous native ratio editors',{autoOpen:true,duplicateEditor:true},'UNKNOWN_DIALOG'],

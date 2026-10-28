@@ -15,6 +15,12 @@ export async function isCoverEditor(dialog){
     root.innerText.includes('首页推荐封面（4:3）')&&root.innerText.includes('个人空间封面（16:9）')&&
     ['.editor_4_3','.editor_16_9'].every(css=>root.querySelectorAll(css).length===1&&root.querySelectorAll(css+' canvas.lower-canvas').length===1&&root.querySelectorAll(css+' .crop-box-fixed').length===1)&&!!root.querySelector(input),INPUT);
 }
+async function isMountingCoverEditor(dialog){
+  return await dialog.evaluate((root,input)=>root.innerText.includes('封面制作')&&
+    root.innerText.includes('首页推荐封面（4:3）')&&root.innerText.includes('个人空间封面（16:9）')&&
+    root.querySelectorAll(input).length===1&&root.querySelectorAll('.cover-editor-head-close').length===1&&
+    !!root.querySelector('.cover-editor-panel-canvas')&&root.querySelectorAll('.editor_4_3,.editor_16_9').length===0,INPUT);
+}
 export async function coverDiagnostics(page){
   return await page.evaluate(input=>[...document.querySelectorAll('.bcc-dialog')].filter(d=>d.getClientRects().length).map(d=>({
     // Structured, bounded control facts, never full HTML, file values or URLs.
@@ -75,13 +81,13 @@ export class CoverEditor{
     while(Date.now()<end){await platformCheck(this.page);if(await predicate())return;await pause(this.poll);}
     fault(code,message);
   }
-  async assertDialogs(){
-    for(const d of await visibleDialogs(this.page))if(!await isCoverEditor(d))fault('UNKNOWN_DIALOG','A blocking dialog interrupted the cover transaction');
+  async assertDialogs(allowMounting=false){
+    for(const d of await visibleDialogs(this.page))if(!await isCoverEditor(d)&&!(allowMounting&&await isMountingCoverEditor(d)))fault('UNKNOWN_DIALOG','A blocking dialog interrupted the cover transaction');
   }
   async open(){
-    this.phase('opening');await this.assertDialogs();
+    this.phase('opening');await this.assertDialogs(true);
     if(!(await visibleDialogs(this.page)).length){const slot=await visible(this.page,OPEN);const target=await slot.$('.cover-empty-pill')??slot;await target.evaluate(e=>e.scrollIntoView({block:'center'}));await target.click();}
-    await this.wait(async()=>{await this.assertDialogs();const ds=await visibleDialogs(this.page);if(ds.length>1)fault('COVER_DIALOG_MISSING','Multiple native cover editors are visible');if(ds.length===1){this.dialog=ds[0];return true;}return false;},'COVER_DIALOG_MISSING','Native dual cover editor did not mount');
+    await this.wait(async()=>{await this.assertDialogs(true);const ds=await visibleDialogs(this.page);if(ds.length>1)fault('COVER_DIALOG_MISSING','Multiple native cover editors are visible');if(ds.length===1&&await isCoverEditor(ds[0])){this.dialog=ds[0];return true;}return false;},'COVER_DIALOG_MISSING','Native dual cover editor did not mount');
     await this.dialog.evaluate(e=>e.setAttribute('data-codex-cover-dialog','true'));
   }
   async select(slot){
@@ -99,13 +105,27 @@ export class CoverEditor{
     }
     return editor;
   }
+  async targetPixels(slot,actual){
+    const key=actual.width+'x'+actual.height;
+    const target=this.expected[slot];target.scaled??={};
+    if(!target.scaled[key])target.scaled[key]=await this.page.evaluate(async({source,width,height,side})=>{
+      const img=new Image();img.src=source;await img.decode();
+      // Match the native canvas raster before making the comparison thumbnail.
+      // Direct source->thumbnail sampling aliases fine text differently from
+      // source->native crop->thumbnail, even when the cover is exactly right.
+      const native=document.createElement('canvas');native.width=width;native.height=height;native.getContext('2d').drawImage(img,0,0,width,height);
+      const thumb=document.createElement('canvas');thumb.width=thumb.height=side;const ctx=thumb.getContext('2d');ctx.drawImage(native,0,0,side,side);
+      return Array.from(ctx.getImageData(0,0,side,side).data);
+    },{source:target.source,width:actual.width,height:actual.height,side:SIDE});
+    return {...actual,pixels:target.scaled[key]};
+  }
   async load(slot){
     const editor=await this.select(slot);const inputs=[];
     for(const input of await this.dialog.$$(INPUT))if(await input.evaluate(e=>{for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden')return false;if(p.classList.contains('bcc-dialog'))return true;}return false;}))inputs.push(input);
     if(inputs.length!==1)fault('COVER_INPUT_MISSING','Cover panel must expose exactly one shared image upload input',{slot,count:inputs.length});
     if(!await editor.evaluate(e=>e.parentElement.classList.contains('active')))fault('COVER_INPUT_MISSING','Ratio changed before selecting its file',{slot});
     this.phase('loading',slot);await inputs[0].uploadFile(this.wanted[slot].path);
-    await this.wait(async()=>{await this.assertDialogs();const actual=await pixels(this.dialog,slot);if(actual&&sameCoverPixels(actual,{...actual,pixels:this.expected[slot].pixels})){this.recorded[slot]=actual;return true;}return false;},'COVER_NOT_LOADED','Local cover pixels did not reach their intended native crop');
+    await this.wait(async()=>{await this.assertDialogs();const actual=await pixels(this.dialog,slot);if(actual&&sameCoverPixels(actual,await this.targetPixels(slot,actual))){this.recorded[slot]=actual;return true;}return false;},'COVER_NOT_LOADED','Local cover pixels did not reach their intended native crop');
     this.phase('loaded',slot);
   }
   async save(){
@@ -131,13 +151,14 @@ export class CoverEditor{
       for(const slot of Object.keys(SLOTS)){
         const source='data:image/png;base64,'+fs.readFileSync(this.wanted[slot].path).toString('base64');
         this.expected[slot]=await this.page.evaluate(async({source,side})=>{const img=new Image();img.src=source;await img.decode();const c=document.createElement('canvas');c.width=c.height=side;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,side,side);ctx.drawImage(img,0,0,side,side);return {pixels:Array.from(ctx.getImageData(0,0,side,side).data),ratio:img.naturalWidth/img.naturalHeight};},{source,side:SIDE});
+        this.expected[slot].source=source;
         if(Math.abs(this.expected[slot].ratio-SLOTS[slot].ratio)>.01)fault('WRONG_COVER_RATIO','Local cover has the wrong aspect ratio',{slot});
       }
       await this.open();for(const slot of Object.keys(SLOTS))await this.load(slot);await this.save();
       this.phase('reopening');await this.open();
       for(const slot of Object.keys(SLOTS)){
         await this.select(slot);this.phase('verifying',slot);
-        await this.wait(async()=>{await this.assertDialogs();const actual=await pixels(this.dialog,slot);return sameCoverPixels(actual,this.recorded[slot])&&sameCoverPixels(actual,{...actual,pixels:this.expected[slot].pixels});},'COVER_READBACK_FAILED','Persisted cover differs from the local target');
+        await this.wait(async()=>{await this.assertDialogs();const actual=await pixels(this.dialog,slot);return actual&&sameCoverPixels(actual,this.recorded[slot])&&sameCoverPixels(actual,await this.targetPixels(slot,actual));},'COVER_READBACK_FAILED','Persisted cover differs from the local target');
       }
       await closeCoverEditor(this.page,this.dialog);this.phase('verified');
       return Object.fromEntries(Object.keys(SLOTS).map(slot=>[slot,{sha256:this.wanted[slot].sha256,slot_loaded:true,persisted:true,verification:'native_crop_local_target_and_reopen',crop:this.recorded[slot].crop}]));

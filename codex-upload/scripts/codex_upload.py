@@ -95,6 +95,10 @@ def from_release(directory,home,output=None):
     root=cfg.get('release_root') or read(Path(home)/'runtime.local.json').get('release_root')
     if not root or not directory.is_relative_to(Path(root).resolve()):problem('OUTSIDE_RELEASE','Upload source must be under the configured release root')
     release=read(directory/'release.json');pub=read(directory/'publication.json');episode=read(directory/'episode.json')
+    edition_slot=episode.get('edition_slot',release.get('edition_slot'))
+    if episode.get('edition_slot') and release.get('edition_slot') and episode['edition_slot']!=release['edition_slot']:
+        problem('EDITION_SLOT_MISMATCH','Episode and release disagree on the edition slot')
+    activity=cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
     if release.get('published') or release.get('state') in {'submitted','reviewing','published'}:problem('ALREADY_PUBLISHED','Do not upload an already submitted/published release')
     if release.get('state')!='ready_for_upload':problem('NOT_READY','Release must have ready_for_upload state')
     name=release.get('video_filename')
@@ -106,17 +110,18 @@ def from_release(directory,home,output=None):
     for label,name in [('four_three','cover-4x3.png'),('sixteen_nine','cover-16x9.png')]:
         covers[label]=dict(**file_record(directory/name,directory),width=image_size(directory/name)[0],height=image_size(directory/name)[1])
     tags=pub.get('tags') or tags_for(episode,pub['title']);trimmed=[]
-    tags=[tag for tag in tags if tag not in cfg.get('replaced_activity_tags',[]) and tag.strip().lstrip('#').casefold()!='claude']
-    if cfg['activity'].get('strategy')!='none' and len(tags)>9:
+    activity_names={a.get('name') for a in [cfg['activity'],*cfg.get('activity_by_slot',{}).values()] if a.get('name')}
+    tags=[tag for tag in tags if tag.strip().lstrip('#') not in activity_names and tag not in cfg.get('replaced_activity_tags',[]) and tag.strip().lstrip('#').casefold()!='claude']
+    if activity.get('strategy')!='none' and len(tags)>9:
         if cfg.get('tag_strategy')=='agent_then_content_rules' and not pub.get('tags_locked'):
             trimmed=tags[9:];tags=tags[:9]
         else:problem('TAG_CAPACITY','Reserve one platform tag for the required activity')
     meta=dict(schema_version=1,operation='upload',release_directory='.',episode_id=episode['id'],alert_id=episode.get('alert_id'),
         reset_event_key=next((s.get('event_key') for s in episode.get('scenes',[]) if s.get('event_key')),None) if episode.get('edition_slot')=='temporary' else None,
         replacement=dict(authorized=True,bvid=episode.get('supersedes_bvid'),reason=episode.get('replacement_reason')) if episode.get('replacement_authorized') is True else None,
-        edition_slot=episode.get('edition_slot',release.get('edition_slot')),counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
+        edition_slot=edition_slot,counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
         video=video,covers=covers,title=pub['title'],description=pub.get('description',''),tags=tags,tags_reserved_for_activity=trimmed,
-        partition=cfg['partition'],collection=cfg['collection'],declarations=cfg['declarations'],activity=cfg['activity'],visibility=cfg['visibility'],captions_burned=True)
+        partition=cfg['partition'],collection=cfg['collection'],declarations=cfg['declarations'],activity=activity,visibility=cfg['visibility'],captions_burned=True)
     target=Path(output).resolve() if output else directory/'upload.codex.json'
     # Paths in the portable manifest are relative to the manifest, not a machine.
     if target.parent!=directory:
@@ -263,7 +268,14 @@ def reconcile(key,home):
     observed=read(progress) if progress.exists() else {}
     field_error=state.get('result',{}).get('error',{}).get('code')
     details=state.get('result',{}).get('error',{}).get('details',{})
-    cover_dialog=field_error=='UNKNOWN_DIALOG' and details.get('dialog_text','').startswith('封面制作\n')
+    controls=details.get('controls',[])
+    # Older workers rejected the visible native shell before its canvases
+    # mounted. Its cover-specific upload selector and two empty ratio slots
+    # identify this pre-submit error without treating arbitrary modals as safe.
+    mounting_cover=(details.get('cover_phase',{}).get('phase')=='opening' and len(controls)==1
+        and controls[0].get('type')=='other' and controls[0].get('upload_inputs')==1 and controls[0].get('close_controls')==1
+        and controls[0].get('slots')==[dict(slot=slot,active=False,canvas=None,crop=None) for slot in ['.editor_4_3','.editor_16_9']])
+    cover_dialog=field_error=='UNKNOWN_DIALOG' and (details.get('dialog_text','').startswith('封面制作\n') or mounting_cover)
     retryable=cover_dialog or field_error in {'SELECTOR_MISSING','AMBIGUOUS_CONTROL','FORM_MISMATCH','COVER_CONTROL_MISSING','COLLECTION_AMBIGUOUS','ACTIVITY_CONTROL_MISSING','COVER_READBACK_FAILED','VISIBILITY_MISSING','READBACK_MISMATCH','PARTITION_MISMATCH','COVER_SAVE_FAILED','COVER_DIALOG_MISSING','COVER_INPUT_MISSING','COVER_NOT_LOADED','COVER_VERIFICATION_REQUIRED','COLLECTION_MISMATCH','TAG_REJECTED','UPLOAD_WIDGET_STALLED'}
     if result.get('ok') is True and result.get('state')=='unknown' and observed.get('submit_started') is False and retryable:
         state.update(state='failed',reconciled_at=now(),safe_retry_evidence={'creator_recheck':'no confirmed association with a published archive','submit_started':False,'returned_field_error':field_error})

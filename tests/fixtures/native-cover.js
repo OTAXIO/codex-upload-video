@@ -34,6 +34,11 @@ window.installCoverFixture=function(options={}){
     state.images={...state.persisted};for(const [slot,data]of Object.entries(state.persisted))await draw(slot,data);
     if(options.corruptReadback&&state.saves)await draw('four_three',state.persisted.sixteen_nine);
     dialog.style.display='block';
+    if(options.mountDelay){
+      const rows=[...panel.children];rows.forEach(e=>e.remove());
+      const loading=document.createElement('div');loading.textContent='首页推荐封面（4:3） 个人空间封面（16:9）';panel.append(loading);
+      if(!options.neverMount)setTimeout(()=>{loading.remove();panel.append(...rows);},options.mountDelay);
+    }
   }
   module.querySelector('button').onclick=()=>setTimeout(reopen,options.openDelay??50);
   dialog.querySelector('.cover-editor-head-close').onclick=()=>{state.close++;dialog.style.display='none';};

@@ -11,6 +11,19 @@ def png(w,h):
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\0'+b'\xff\xff\xff'*w)*h))+chunk(b'IEND',b'')
 
 class CoreChecks(unittest.TestCase):
+    def test_mounting_cover_retry_requires_exact_controls_and_safe_recheck(self):
+        directory,manifest=self.release()
+        key='a'*64;ledger=self.home/'state'/(key+'.json');progress=self.home/'state'/(key+'.progress.json')
+        details=dict(cover_phase=dict(phase='opening'),controls=[dict(type='other',upload_inputs=1,close_controls=1,slots=[dict(slot=s,active=False,canvas=None,crop=None) for s in ['.editor_4_3','.editor_16_9']])])
+        base=dict(key=key,operation='upload',state='unknown',manifest=str(manifest),started_at=u.now(),result=dict(ok=False,error=dict(code='UNKNOWN_DIALOG',details=details)))
+        for marker,expected in [(True,'unknown'),(False,'failed')]:
+            u.write(ledger,base);u.write(progress,dict(submit_started=marker))
+            with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):self.assertEqual(u.reconcile(key,self.home)['state'],expected)
+        invalid=copy.deepcopy(base);invalid['result']['error']['details']['controls'][0]['upload_inputs']=0;u.write(ledger,invalid)
+        with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):self.assertEqual(u.reconcile(key,self.home)['state'],'unknown')
+        u.write(ledger,base)
+        with patch.object(u,'backend',return_value=dict(ok=False,error=dict(code='RECHECK_FAILED'))):self.assertFalse(u.reconcile(key,self.home)['ok'])
+        self.assertEqual(u.read(ledger)['state'],'unknown')
     def setUp(self):
         (ROOT/'.test-tmp').mkdir(exist_ok=True)
         self.tmp=tempfile.TemporaryDirectory(dir=ROOT/'.test-tmp');self.root=Path(self.tmp.name);self.home=self.root/'private'
@@ -28,16 +41,20 @@ class CoreChecks(unittest.TestCase):
         with self.assertRaises(u.UploadError) as e:fn()
         self.assertEqual(e.exception.code,code)
 
-    def test_new_release_uses_fixed_endfield_activity(self):
+    def test_release_activity_is_selected_by_edition_slot(self):
         directory,manifest=self.release()
-        activity=u.read(manifest)['activity']
-        self.assertEqual(activity['strategy'],'explicit')
-        self.assertEqual(activity['id'],1325166)
-        self.assertEqual(activity['name'],'明日方舟终末地创作者应援计划')
-        self.assertEqual(activity['fallback'],'stop')
+        for slot,topic_id,name in [('morning',1325166,'明日方舟终末地创作者应援计划'),('night',8314,'明日方舟创作者应援计划'),('temporary',1325166,'明日方舟终末地创作者应援计划')]:
+            episode=u.read(directory/'episode.json');episode['edition_slot']=slot;u.write(directory/'episode.json',episode)
+            release=u.read(directory/'release.json');release['edition_slot']=slot;u.write(directory/'release.json',release)
+            u.from_release(directory,self.home);activity=u.read(manifest)['activity']
+            self.assertEqual(activity['strategy'],'explicit');self.assertEqual(activity['id'],topic_id);self.assertEqual(activity['name'],name);self.assertEqual(activity['fallback'],'stop')
         pub=u.read(directory/'publication.json');pub['tags'].append('科技猎手');u.write(directory/'publication.json',pub)
+        pub['tags']+=['明日方舟创作者应援计划','#明日方舟终末地创作者应援计划'];u.write(directory/'publication.json',pub)
         u.from_release(directory,self.home)
-        self.assertNotIn('科技猎手',u.read(manifest)['tags'])
+        self.assertEqual(u.read(manifest)['tags'],['AI','OpenAI'])
+    def test_conflicting_edition_slots_cannot_select_an_activity(self):
+        directory,manifest=self.release();release=u.read(directory/'release.json');release['edition_slot']='morning';u.write(directory/'release.json',release)
+        self.assertCode('EDITION_SLOT_MISMATCH',lambda:u.from_release(directory,self.home))
 
     def test_portable_metadata_and_zero_network_plan(self):
         directory,manifest=self.release();meta=u.read(manifest)
