@@ -12,6 +12,10 @@ test('relevant free activity, measured popularity, no paid promotion',()=>{
   assert.equal(popularity('9.6亿次播放'),960000000);
   const rows=[{id:'1',name:'AI test',views:100,index:0},{id:'2',name:'科技 test',views:200,index:1},{id:'3',name:'生活',views:1e12,index:2},{id:'4',name:'AI付费',paid:true,views:1e15,index:3}];
   assert.equal(chooseActivity(rows,{strategy:'relevant_popular_free',keywords:['AI','科技']}).id,'2');
+  // Hottest eligible activity regardless of topic; paid/disabled ones never win.
+  assert.equal(chooseActivity(rows,{strategy:'most_popular_free'}).id,'3');
+  assert.equal(chooseActivity([{...rows[2],disabled:true},rows[0]],{strategy:'most_popular_free'}).id,'1');
+  assert.equal(chooseActivity([],{strategy:'most_popular_free'}),null);
 });
 test('explicit activity uses the verified official campaign upload entry',()=>{
   const p={strategy:'explicit',id:1325166,name:'明日方舟终末地创作者应援计划'};

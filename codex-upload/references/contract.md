@@ -1,6 +1,6 @@
 # 元数据与状态契约
 
-schema_version=1。路径相对 manifest 所在目录解析，带文件字节数及 SHA-256。上传 manifest 由 `from-release` 生成，包含 operation=upload、episode_id、edition_slot、video、covers、title、description、tags、partition、collection、declarations、activity、visibility、captions_burned。
+schema_version=1。路径相对 manifest 所在目录解析，带文件字节数及 SHA-256。上传 manifest 由 `from-release` 生成，包含 operation=upload、episode_id、edition_slot、edition_series（可为空）、video、covers、title、description、tags、partition、collection、declarations、activity、visibility、captions_burned。
 
 video 为 {path,bytes,sha256}；covers.four_three / sixteen_nine 另含 width/height。临时新闻另带 alert_id / reset_event_key，counts_toward_daily_main_limit=false。每次发布重新核对 release 状态和资产哈希；所有上传资产必须位于该 release 内。
 

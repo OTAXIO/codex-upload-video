@@ -22,7 +22,7 @@ description: 上传 Bilibili 视频或修改指定稿件的标题、简介、双
 
 ## 用户默认
 
-当前用户默认科技数码、News 合集、AI 生成＋自制原创/禁止转载、公开可见、双比例封面、内嵌字幕。标签由代理按本期事实内容决定；不固定复制品牌列表，不加无关热词。活动按edition_slot选择：morning为“明日方舟终末地创作者应援计划”（1325166），night为“明日方舟创作者应援计划”（8314）；temporary沿用默认终末地活动。from-release从profile.activity_by_slot解析，不按当前钟点或标题猜时段；episode与release时段冲突则停止。精确ID和名称，不按热门度自动替代。活动未出现在推荐中时用精确活动标签输入回车并核对平台活动图标；不可用则停止报告。活动标签会占用平台标签数，应预留容量。默认 profile 可被用户当前明确要求覆盖。
+当前用户默认科技数码、News 合集、AI 生成＋自制原创/禁止转载、公开可见、双比例封面、内嵌字幕。标签由代理按本期事实内容决定；不固定复制品牌列表，不加无关热词。活动按edition_slot选择：morning为“明日方舟终末地创作者应援计划”（1325166），night为“明日方舟创作者应援计划”（8314）；temporary沿用默认终末地活动。from-release从profile.activity_by_slot解析，不按当前钟点或标题猜时段；episode与release时段冲突则停止。精确ID和名称，不按热门度自动替代。活动未出现在推荐中时用精确活动标签输入回车并核对平台活动图标；不可用则停止报告。活动标签会占用平台标签数，应预留容量。默认 profile 可被用户当前明确要求覆盖。2026-11-07 起episode带edition_series时优先按系列选择（profile.activity_by_series与partition_by_series，缺项即SERIES_DEFAULTS_MISSING停止）：ai为科技数码＋most_popular_free（可参加的免费活动中平台显示热度最高者，不限题材，没有则不挂）；arknights为游戏＋精确8314；endfield为游戏＋精确1325166。分区名与平台界面不符时PARTITION_MISMATCH停止，不自行换分区。无edition_series的旧期次仍按上文edition_slot规则。
 
 标题封面采用已确认的具体事实，不擅改已批准标题。封面替换用本地定稿图片；需要重新生成素材时沿用用户要求并另存版本，本 skill 不替新闻来源作真实性背书。
 

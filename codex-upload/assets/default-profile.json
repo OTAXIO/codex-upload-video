@@ -43,5 +43,33 @@
       "fallback": "stop",
       "source_url": "https://www.bilibili.com/blackboard/era/ao3owUS2em2pXhta.html"
     }
+  },
+  "activity_by_series": {
+    "ai": {
+      "strategy": "most_popular_free",
+      "required_when_available": false,
+      "fallback": "none"
+    },
+    "arknights": {
+      "strategy": "explicit",
+      "id": 8314,
+      "name": "明日方舟创作者应援计划",
+      "required_when_available": true,
+      "fallback": "stop",
+      "source_url": "https://www.bilibili.com/blackboard/era/ao3owUS2em2pXhta.html"
+    },
+    "endfield": {
+      "strategy": "explicit",
+      "id": 1325166,
+      "name": "明日方舟终末地创作者应援计划",
+      "required_when_available": true,
+      "fallback": "stop",
+      "source_url": "https://www.bilibili.com/blackboard/era/hProYF7NSH5CPvi7.html"
+    }
+  },
+  "partition_by_series": {
+    "ai": "科技数码",
+    "arknights": "游戏",
+    "endfield": "游戏"
   }
 }

@@ -31,7 +31,8 @@ export function chooseActivity(rows,policy){
     const chosen=candidates.filter(x=>String(x.id)===String(policy.id)&&(!policy.name||x.name===policy.name));
     if(chosen.length!==1)fault('ACTIVITY_NOT_AVAILABLE','The specified activity is not eligible');return chosen[0];
   }
-  const relevant=candidates.filter(x=>words.some(w=>x.name.toLowerCase().includes(w.toLowerCase())));
+  // most_popular_free: the user wants the hottest eligible activity regardless of topic.
+  const relevant=policy.strategy==='most_popular_free'?candidates:candidates.filter(x=>words.some(w=>x.name.toLowerCase().includes(w.toLowerCase())));
   relevant.sort((a,b)=>(b.views??-1)-(a.views??-1)||a.index-b.index);return relevant[0]??null;
 }
 export function compareFields(actual,wanted,activity=null){

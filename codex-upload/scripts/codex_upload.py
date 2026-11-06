@@ -98,7 +98,13 @@ def from_release(directory,home,output=None):
     edition_slot=episode.get('edition_slot',release.get('edition_slot'))
     if episode.get('edition_slot') and release.get('edition_slot') and episode['edition_slot']!=release['edition_slot']:
         problem('EDITION_SLOT_MISMATCH','Episode and release disagree on the edition slot')
-    activity=cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
+    # A single-audience series (ai/arknights/endfield) carries its own activity
+    # and partition; legacy mixed editions keep the per-slot defaults.
+    series=episode.get('edition_series')
+    if series and (series not in cfg.get('activity_by_series',{}) or series not in cfg.get('partition_by_series',{})):
+        problem('SERIES_DEFAULTS_MISSING','No configured activity/partition for this edition series',series=series)
+    activity=cfg['activity_by_series'][series] if series else cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
+    partition=cfg['partition_by_series'][series] if series else cfg['partition']
     if release.get('published') or release.get('state') in {'submitted','reviewing','published'}:problem('ALREADY_PUBLISHED','Do not upload an already submitted/published release')
     if release.get('state')!='ready_for_upload':problem('NOT_READY','Release must have ready_for_upload state')
     name=release.get('video_filename')
@@ -110,7 +116,7 @@ def from_release(directory,home,output=None):
     for label,name in [('four_three','cover-4x3.png'),('sixteen_nine','cover-16x9.png')]:
         covers[label]=dict(**file_record(directory/name,directory),width=image_size(directory/name)[0],height=image_size(directory/name)[1])
     tags=pub.get('tags') or tags_for(episode,pub['title']);trimmed=[]
-    activity_names={a.get('name') for a in [cfg['activity'],*cfg.get('activity_by_slot',{}).values()] if a.get('name')}
+    activity_names={a.get('name') for a in [cfg['activity'],*cfg.get('activity_by_slot',{}).values(),*cfg.get('activity_by_series',{}).values()] if a.get('name')}
     tags=[tag for tag in tags if tag.strip().lstrip('#') not in activity_names and tag not in cfg.get('replaced_activity_tags',[]) and tag.strip().lstrip('#').casefold()!='claude']
     if activity.get('strategy')!='none' and len(tags)>9:
         if cfg.get('tag_strategy')=='agent_then_content_rules' and not pub.get('tags_locked'):
@@ -119,9 +125,9 @@ def from_release(directory,home,output=None):
     meta=dict(schema_version=1,operation='upload',release_directory='.',episode_id=episode['id'],alert_id=episode.get('alert_id'),
         reset_event_key=next((s.get('event_key') for s in episode.get('scenes',[]) if s.get('event_key')),None) if episode.get('edition_slot')=='temporary' else None,
         replacement=dict(authorized=True,bvid=episode.get('supersedes_bvid'),reason=episode.get('replacement_reason')) if episode.get('replacement_authorized') is True else None,
-        edition_slot=edition_slot,counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
+        edition_slot=edition_slot,edition_series=series,counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
         video=video,covers=covers,title=pub['title'],description=pub.get('description',''),tags=tags,tags_reserved_for_activity=trimmed,
-        partition=cfg['partition'],collection=cfg['collection'],declarations=cfg['declarations'],activity=activity,visibility=cfg['visibility'],captions_burned=True)
+        partition=partition,collection=cfg['collection'],declarations=cfg['declarations'],activity=activity,visibility=cfg['visibility'],captions_burned=True)
     target=Path(output).resolve() if output else directory/'upload.codex.json'
     # Paths in the portable manifest are relative to the manifest, not a machine.
     if target.parent!=directory:
@@ -152,7 +158,7 @@ def validate_meta(meta,base):
         if any(t.strip().lstrip('#').casefold()=='claude' for t in tags):problem('EXCLUDED_TAG','User excluded the Claude tag from future submissions')
     if 'declarations' in values and any(not isinstance(values['declarations'].get(k),bool) for k in ['original','ai_generated','no_reprint']):problem('INVALID_DECLARATIONS','Use explicit original/ai_generated/no_reprint booleans')
     if 'visibility' in values and values['visibility'] not in {'public','self'}:problem('INVALID_VISIBILITY','Visibility must be public or self')
-    if 'activity' in values and values['activity'].get('strategy') not in {'relevant_popular_free','none','explicit'}:problem('INVALID_ACTIVITY','Unsupported activity strategy')
+    if 'activity' in values and values['activity'].get('strategy') not in {'relevant_popular_free','most_popular_free','none','explicit'}:problem('INVALID_ACTIVITY','Unsupported activity strategy')
     if 'covers' in values:
         for label,ratio in [('four_three',4/3),('sixteen_nine',16/9)]:
             record=values['covers'].get(label)

@@ -52,6 +52,17 @@ class CoreChecks(unittest.TestCase):
         pub['tags']+=['明日方舟创作者应援计划','#明日方舟终末地创作者应援计划'];u.write(directory/'publication.json',pub)
         u.from_release(directory,self.home)
         self.assertEqual(u.read(manifest)['tags'],['AI','OpenAI'])
+    def test_series_selects_its_own_activity_and_partition(self):
+        directory,manifest=self.release()
+        for slot,series,partition,strategy,topic_id in [('morning','ai','科技数码','most_popular_free',None),
+                                                         ('night','arknights','游戏','explicit',8314),('night','endfield','游戏','explicit',1325166)]:
+            episode=u.read(directory/'episode.json');episode.update(edition_slot=slot,edition_series=series);u.write(directory/'episode.json',episode)
+            release=u.read(directory/'release.json');release['edition_slot']=slot;u.write(directory/'release.json',release)
+            u.from_release(directory,self.home);meta=u.read(manifest)
+            self.assertEqual((meta['partition'],meta['edition_series'],meta['activity']['strategy']),(partition,series,strategy))
+            self.assertEqual(meta['activity'].get('id'),topic_id)
+        episode['edition_series']='unknown';u.write(directory/'episode.json',episode)
+        self.assertCode('SERIES_DEFAULTS_MISSING',lambda:u.from_release(directory,self.home))
     def test_conflicting_edition_slots_cannot_select_an_activity(self):
         directory,manifest=self.release();release=u.read(directory/'release.json');release['edition_slot']='morning';u.write(directory/'release.json',release)
         self.assertCode('EDITION_SLOT_MISMATCH',lambda:u.from_release(directory,self.home))
