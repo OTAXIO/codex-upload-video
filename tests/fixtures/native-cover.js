@@ -53,8 +53,14 @@ window.installCoverFixture=function(options={}){
   if(options.duplicateInput)dialog.querySelector('.cover-upload').append(uploader.cloneNode());
   if(options.unknownContract)dialog.querySelector('.editor_16_9').classList.remove('editor_16_9');
   if(options.duplicateEditor)panel.append(panel.firstElementChild.cloneNode(true));
-  const save=()=>{state.saves++;state.persisted={...state.images};dialog.style.display='none';};
+  const save=()=>{
+    state.saves++;state.persisted={...state.images};
+    // Observed 2026-11-07: canvases unmount while the shell is still visible.
+    if(options.closingTeardown){const rows=[...panel.children];rows.forEach(e=>e.remove());setTimeout(()=>{dialog.style.display='none';panel.append(...rows);},options.closingTeardown);return;}
+    dialog.style.display='none';
+  };
   dialog.querySelector('.done').onclick=()=>{
+    if(options.transientModal&&!state.toast){state.toast=1;const d=document.createElement('div');d.className='bcc-dialog native-fixture sync-warning';d.textContent='封面处理中';document.body.append(d);setTimeout(()=>d.remove(),options.transientModal);}
     if(options.unknownModal){const d=document.createElement('div');d.className='bcc-dialog native-fixture sync-warning';d.textContent='需要购买推广';document.body.append(d);return;}
     if(options.syncWarning&&(!state.manual||options.repeatWarning)){
       const d=document.createElement('div');d.className='bcc-dialog native-fixture sync-warning';

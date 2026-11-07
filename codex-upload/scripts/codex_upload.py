@@ -281,7 +281,12 @@ def reconcile(key,home):
     mounting_cover=(details.get('cover_phase',{}).get('phase')=='opening' and len(controls)==1
         and controls[0].get('type')=='other' and controls[0].get('upload_inputs')==1 and controls[0].get('close_controls')==1
         and controls[0].get('slots')==[dict(slot=slot,active=False,canvas=None,crop=None) for slot in ['.editor_4_3','.editor_16_9']])
-    cover_dialog=field_error=='UNKNOWN_DIALOG' and (details.get('dialog_text','').startswith('封面制作\n') or mounting_cover)
+    # A fault raised by the cover transaction itself carries its phase trace;
+    # covers are edited before submitOnce, so with submit_started=False and an
+    # empty creator recheck it is a pre-submit error (2026-11-07 save-phase case).
+    cover_phases={'opening','selecting','loading','loaded','saving','manual_choice','reopening','verifying'}
+    in_cover=details.get('cover_phase',{}).get('phase') in cover_phases and isinstance(details.get('cover_trace'),list) and bool(details['cover_trace'])
+    cover_dialog=field_error=='UNKNOWN_DIALOG' and (details.get('dialog_text','').startswith('封面制作\n') or mounting_cover or in_cover)
     retryable=cover_dialog or field_error in {'SELECTOR_MISSING','AMBIGUOUS_CONTROL','FORM_MISMATCH','COVER_CONTROL_MISSING','COLLECTION_AMBIGUOUS','ACTIVITY_CONTROL_MISSING','COVER_READBACK_FAILED','VISIBILITY_MISSING','READBACK_MISMATCH','PARTITION_MISMATCH','COVER_SAVE_FAILED','COVER_DIALOG_MISSING','COVER_INPUT_MISSING','COVER_NOT_LOADED','COVER_VERIFICATION_REQUIRED','COLLECTION_MISMATCH','TAG_REJECTED','UPLOAD_WIDGET_STALLED'}
     if result.get('ok') is True and result.get('state')=='unknown' and observed.get('submit_started') is False and retryable:
         state.update(state='failed',reconciled_at=now(),safe_retry_evidence={'creator_recheck':'no confirmed association with a published archive','submit_started':False,'returned_field_error':field_error})

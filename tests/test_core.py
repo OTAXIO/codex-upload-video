@@ -24,6 +24,18 @@ class CoreChecks(unittest.TestCase):
         u.write(ledger,base)
         with patch.object(u,'backend',return_value=dict(ok=False,error=dict(code='RECHECK_FAILED'))):self.assertFalse(u.reconcile(key,self.home)['ok'])
         self.assertEqual(u.read(ledger)['state'],'unknown')
+    def test_cover_transaction_fault_is_safe_to_retry_only_before_submit(self):
+        directory,manifest=self.release()
+        key='b'*64;ledger=self.home/'state'/(key+'.json');progress=self.home/'state'/(key+'.progress.json')
+        trace=[dict(phase='loaded',slot='sixteen_nine'),dict(phase='saving')]
+        base=dict(key=key,operation='upload',state='unknown',manifest=str(manifest),started_at=u.now(),
+                  result=dict(ok=False,error=dict(code='UNKNOWN_DIALOG',details=dict(cover_phase=trace[-1],cover_trace=trace,controls=[]))))
+        for marker,expected in [(True,'unknown'),(False,'failed')]:
+            u.write(ledger,base);u.write(progress,dict(submit_started=marker))
+            with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):self.assertEqual(u.reconcile(key,self.home)['state'],expected)
+        # A dialog fault outside the cover transaction stays unknown.
+        other=copy.deepcopy(base);other['result']['error']['details']=dict(dialog_text='需要购买推广');u.write(ledger,other);u.write(progress,dict(submit_started=False))
+        with patch.object(u,'backend',return_value=dict(ok=True,state='unknown')):self.assertEqual(u.reconcile(key,self.home)['state'],'unknown')
     def setUp(self):
         (ROOT/'.test-tmp').mkdir(exist_ok=True)
         self.tmp=tempfile.TemporaryDirectory(dir=ROOT/'.test-tmp');self.root=Path(self.tmp.name);self.home=self.root/'private'

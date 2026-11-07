@@ -6,6 +6,7 @@ const OPEN='.cover-module-main .cover-slot, .cover-module .cover-img';
 const CLOSE='.cover-editor-head-close, .bcc-dialog__close';
 const SLOTS={four_three:{css:'.editor_4_3',label:'首页推荐封面（4:3）',ratio:4/3},sixteen_nine:{css:'.editor_16_9',label:'个人空间封面（16:9）',ratio:16/9}};
 const SIDE=128;
+const SETTLE_MS=1200;
 const verified=new WeakMap();
 
 // Only the verified native editor contract is supported. A convenient generic
@@ -81,8 +82,19 @@ export class CoverEditor{
     while(Date.now()<end){await platformCheck(this.page);if(await predicate())return;await pause(this.poll);}
     fault(code,message);
   }
+  async strangers(allowMounting){
+    const out=[];for(const d of await visibleDialogs(this.page))if(!await isCoverEditor(d)&&!(allowMounting&&await isMountingCoverEditor(d)))out.push(d);return out;
+  }
   async assertDialogs(allowMounting=false){
-    for(const d of await visibleDialogs(this.page))if(!await isCoverEditor(d)&&!(allowMounting&&await isMountingCoverEditor(d)))fault('UNKNOWN_DIALOG','A blocking dialog interrupted the cover transaction');
+    // The native editor unmounts its canvases a moment before its shell hides
+    // after "完成", and toasts come and go. Only a dialog that stays is blocking;
+    // nothing is ever clicked here.
+    const end=Date.now()+SETTLE_MS;let left=await this.strangers(allowMounting);
+    while(left.length&&Date.now()<end){await pause(Math.min(this.poll,100));left=await this.strangers(allowMounting);}
+    if(left.length){
+      const text=await left[0].evaluate(e=>e.innerText.trim()).catch(()=>'');
+      fault('UNKNOWN_DIALOG','A blocking dialog interrupted the cover transaction',{dialog_text:text.slice(0,100)});
+    }
   }
   async open(){
     this.phase('opening');await this.assertDialogs(true);

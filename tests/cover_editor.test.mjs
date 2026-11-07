@@ -59,6 +59,12 @@ test('delayed editor, image decode and save are awaited before readback',browser
 test('visible native shell waits for lazy ratio canvases, including reopen',browserTest,async()=>{
   await fixture({mountDelay:450},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);assert.equal(await page.evaluate(()=>coverFixture.saves),1);});
 });
+test('editor shell that empties before hiding after save is not an unknown dialog',browserTest,async()=>{
+  await fixture({closingTeardown:250},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);assert.equal(await page.evaluate(()=>coverFixture.saves),1);});
+});
+test('short-lived notice during save is waited out, never clicked',browserTest,async()=>{
+  await fixture({transientModal:300},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);});
+});
 test('fine cover artwork compares through the native raster sampling path',browserTest,async()=>{
   await fixture({fineArtwork:true},async(page,wanted)=>{await covers(page,wanted);await assertCoversVerified(page,wanted);});
 });
@@ -74,7 +80,7 @@ for(const [name,options,code]of [
   ['unknown modal during save',{unknownModal:true},'UNKNOWN_DIALOG']
 ])test('submission blocked: '+name,browserTest,async()=>{
   await fixture(options,async(page,wanted)=>{
-    await assert.rejects(new CoverEditor(page,wanted,{timeout:1500,poll:60}).run(),e=>e.code===code&&Array.isArray(e.details.cover_trace));
+    await assert.rejects(new CoverEditor(page,wanted,{timeout:1500,poll:60}).run(),e=>e.code===code&&Array.isArray(e.details.cover_trace)&&(name!=='unknown modal during save'||e.details.dialog_text==='需要购买推广'));
     await assert.rejects(assertCoversVerified(page,wanted),e=>e.code==='COVER_VERIFICATION_REQUIRED');
     assert.equal(await page.evaluate(()=>coverFixture.sync),0);
   });
