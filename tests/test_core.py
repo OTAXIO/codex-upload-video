@@ -74,11 +74,13 @@ class CoreChecks(unittest.TestCase):
             self.assertEqual((meta['partition'],meta['edition_series'],meta['activity']['strategy']),(partition,series,strategy))
             self.assertEqual(meta['activity'].get('id'),topic_id)
             self.assertEqual(meta['collection']['name'],'AI-News' if series=='ai' else 'Game-News')
-        # A temporary game alert goes to Game-News; a temporary AI alert keeps the default AI-News.
+        # A temporary game alert goes to Game-News in the 游戏 partition; a temporary AI alert keeps AI-News / 科技数码.
         release=u.read(directory/'release.json');release['edition_slot']='temporary';u.write(directory/'release.json',release)
-        for scenes,name in [([dict(title='维护延迟',game='arknights')],'Game-News'),([dict(title='Codex reset',company='OpenAI')],'AI-News')]:
+        for scenes,name,partition in [([dict(title='维护延迟',game='arknights')],'Game-News','游戏'),([dict(title='版本更新',game='endfield')],'Game-News','游戏'),
+                                      ([dict(title='Codex reset',company='OpenAI')],'AI-News','科技数码')]:
             episode.pop('edition_series',None);episode.update(edition_slot='temporary',scenes=scenes);u.write(directory/'episode.json',episode)
-            u.from_release(directory,self.home);self.assertEqual(u.read(manifest)['collection']['name'],name)
+            u.from_release(directory,self.home);meta=u.read(manifest)
+            self.assertEqual((meta['collection']['name'],meta['partition']),(name,partition))
         release['edition_slot']='night';u.write(directory/'release.json',release)
         episode['edition_slot']='night';episode['edition_series']='unknown';u.write(directory/'episode.json',episode)
         self.assertCode('SERIES_DEFAULTS_MISSING',lambda:u.from_release(directory,self.home))
