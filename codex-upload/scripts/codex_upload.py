@@ -105,6 +105,10 @@ def from_release(directory,home,output=None):
         problem('SERIES_DEFAULTS_MISSING','No configured activity/partition for this edition series',series=series)
     activity=cfg['activity_by_series'][series] if series else cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
     partition=cfg['partition_by_series'][series] if series else cfg['partition']
+    # 2026-11-09: AI videos go to AI-News, game videos (series or a temporary
+    # game alert) to Game-News; anything else keeps the default collection.
+    topic=series or (next((s.get('game') for s in episode.get('scenes',[]) if s.get('game') in {'arknights','endfield'}),None) if edition_slot=='temporary' else None)
+    collection=cfg.get('collection_by_series',{}).get(topic,cfg['collection'])
     if release.get('published') or release.get('state') in {'submitted','reviewing','published'}:problem('ALREADY_PUBLISHED','Do not upload an already submitted/published release')
     if release.get('state')!='ready_for_upload':problem('NOT_READY','Release must have ready_for_upload state')
     name=release.get('video_filename')
@@ -127,7 +131,7 @@ def from_release(directory,home,output=None):
         replacement=dict(authorized=True,bvid=episode.get('supersedes_bvid'),reason=episode.get('replacement_reason')) if episode.get('replacement_authorized') is True else None,
         edition_slot=edition_slot,edition_series=series,counts_toward_daily_main_limit=episode.get('counts_toward_daily_main_limit',episode.get('edition_slot')!='temporary'),
         video=video,covers=covers,title=pub['title'],description=pub.get('description',''),tags=tags,tags_reserved_for_activity=trimmed,
-        partition=partition,collection=cfg['collection'],declarations=cfg['declarations'],activity=activity,visibility=cfg['visibility'],captions_burned=True)
+        partition=partition,collection=collection,declarations=cfg['declarations'],activity=activity,visibility=cfg['visibility'],captions_burned=True)
     target=Path(output).resolve() if output else directory/'upload.codex.json'
     # Paths in the portable manifest are relative to the manifest, not a machine.
     if target.parent!=directory:

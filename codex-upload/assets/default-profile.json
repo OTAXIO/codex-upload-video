@@ -3,8 +3,13 @@
   "platform": "bilibili",
   "partition": "科技数码",
   "collection": {
-    "name": "News",
+    "name": "AI-News",
     "required": true
+  },
+  "collection_by_series": {
+    "ai": {"name": "AI-News", "required": true},
+    "arknights": {"name": "Game-News", "required": true},
+    "endfield": {"name": "Game-News", "required": true}
   },
   "declarations": {
     "original": true,

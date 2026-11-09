@@ -73,7 +73,14 @@ class CoreChecks(unittest.TestCase):
             u.from_release(directory,self.home);meta=u.read(manifest)
             self.assertEqual((meta['partition'],meta['edition_series'],meta['activity']['strategy']),(partition,series,strategy))
             self.assertEqual(meta['activity'].get('id'),topic_id)
-        episode['edition_series']='unknown';u.write(directory/'episode.json',episode)
+            self.assertEqual(meta['collection']['name'],'AI-News' if series=='ai' else 'Game-News')
+        # A temporary game alert goes to Game-News; a temporary AI alert keeps the default AI-News.
+        release=u.read(directory/'release.json');release['edition_slot']='temporary';u.write(directory/'release.json',release)
+        for scenes,name in [([dict(title='维护延迟',game='arknights')],'Game-News'),([dict(title='Codex reset',company='OpenAI')],'AI-News')]:
+            episode.pop('edition_series',None);episode.update(edition_slot='temporary',scenes=scenes);u.write(directory/'episode.json',episode)
+            u.from_release(directory,self.home);self.assertEqual(u.read(manifest)['collection']['name'],name)
+        release['edition_slot']='night';u.write(directory/'release.json',release)
+        episode['edition_slot']='night';episode['edition_series']='unknown';u.write(directory/'episode.json',episode)
         self.assertCode('SERIES_DEFAULTS_MISSING',lambda:u.from_release(directory,self.home))
     def test_conflicting_edition_slots_cannot_select_an_activity(self):
         directory,manifest=self.release();release=u.read(directory/'release.json');release['edition_slot']='morning';u.write(directory/'release.json',release)

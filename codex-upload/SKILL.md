@@ -22,7 +22,7 @@ description: 上传 Bilibili 视频或修改指定稿件的标题、简介、双
 
 ## 用户默认
 
-当前用户默认科技数码、News 合集、AI 生成＋自制原创/禁止转载、公开可见、双比例封面、内嵌字幕。标签由代理按本期事实内容决定；不固定复制品牌列表，不加无关热词。活动按edition_slot选择：morning为“明日方舟终末地创作者应援计划”（1325166），night为“明日方舟创作者应援计划”（8314）；temporary沿用默认终末地活动。from-release从profile.activity_by_slot解析，不按当前钟点或标题猜时段；episode与release时段冲突则停止。精确ID和名称，不按热门度自动替代。活动未出现在推荐中时用精确活动标签输入回车并核对平台活动图标；不可用则停止报告。活动标签会占用平台标签数，应预留容量。默认 profile 可被用户当前明确要求覆盖。2026-11-07 起episode带edition_series时优先按系列选择（profile.activity_by_series与partition_by_series，缺项即SERIES_DEFAULTS_MISSING停止）：ai为科技数码＋most_popular_free（可参加的免费活动中平台显示热度最高者，不限题材，没有则不挂）；arknights为游戏＋精确8314；endfield为游戏＋精确1325166。分区名与平台界面不符时PARTITION_MISMATCH停止，不自行换分区。无edition_series的旧期次仍按上文edition_slot规则。
+当前用户默认科技数码、News 合集、AI 生成＋自制原创/禁止转载、公开可见、双比例封面、内嵌字幕。标签由代理按本期事实内容决定；不固定复制品牌列表，不加无关热词。活动按edition_slot选择：morning为“明日方舟终末地创作者应援计划”（1325166），night为“明日方舟创作者应援计划”（8314）；temporary沿用默认终末地活动。from-release从profile.activity_by_slot解析，不按当前钟点或标题猜时段；episode与release时段冲突则停止。精确ID和名称，不按热门度自动替代。活动未出现在推荐中时用精确活动标签输入回车并核对平台活动图标；不可用则停止报告。活动标签会占用平台标签数，应预留容量。默认 profile 可被用户当前明确要求覆盖。2026-11-07 起episode带edition_series时优先按系列选择（profile.activity_by_series与partition_by_series，缺项即SERIES_DEFAULTS_MISSING停止）：ai为科技数码＋most_popular_free（可参加的免费活动中平台显示热度最高者，不限题材，没有则不挂）；arknights为游戏＋精确8314；endfield为游戏＋精确1325166。分区名与平台界面不符时PARTITION_MISMATCH停止，不自行换分区。无edition_series的旧期次仍按上文edition_slot规则。2026-11-09 合集按题材选择（profile.collection_by_series）：ai 及 AI 类 temporary 进“AI-News”（原 News 合集 9420660 已由用户改名），arknights/endfield 及含明日方舟/终末地场景的 temporary 进“Game-News”。合集不存在时以 COLLECTION_AMBIGUOUS 在上传任何文件前停止，代理不得自行创建合集或改投其他合集。
 
 标题封面采用已确认的具体事实，不擅改已批准标题。封面替换用本地定稿图片；需要重新生成素材时沿用用户要求并另存版本，本 skill 不替新闻来源作真实性背书。
 
@@ -45,7 +45,7 @@ python scripts/codex_upload.py --home LOCAL_PRIVATE_HOME verify BVID
 
 - 表单按实际状态设置。发生最终读回不一致时，只修对应字段一次，不重填整个表单，不重选视频。新稿/自动填充/重试均使用同一路径。
 - 封面由cover_editor.mjs按原生结构处理：等待编辑器、实际中心点击及独占比例激活、唯一组件输入、真实crop-box裁切与本地目标比较、保存重开再比较。白边不能掩盖错误内容。最终提交独立检查当前页面的双封面验证记录；更换目标或导航后不能复用。未知结构、未知弹窗、认证及限流停止，保留阶段诊断，不自动重放失败的封面事务。
-- News 按稳定合集 ID 和完整目录次序消歧，同项点击可能取消选择；只在同表单有限恢复并读回，不按同名切换另一合集。
+- 合集（AI-News / Game-News）按稳定合集 ID 和完整目录次序消歧，同项点击可能取消选择；只在同表单有限恢复并读回，不按同名切换另一合集。
 - 最终按钮只点击一次。已有 submit_started=true 时代码拒绝再次提交；只接收实际 POST 的平台 code0 与 aid/BV 作为成功回执。
 - unknown 先回查。只有同步字段错误、submit_started=false、创作中心成功回查三项齐备才允许安全恢复；超时/缺标志/已经开始提交不盲目重投。安全回查确认未进入最终提交、且故障已修复后可自动恢复，不设固定次数上限；每次重新回查并累计审计次数，未知提交、已提交、登录/验证码/风控仍按原规则停止，不盲目重复上传。
 - 已授权正式新闻技术检查通过后继续投稿，人工试听不是新增授权关卡。用户明确暂停/审核及实际音频错误仍须遵守。
