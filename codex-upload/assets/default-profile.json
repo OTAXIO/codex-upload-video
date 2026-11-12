@@ -51,9 +51,12 @@
   },
   "activity_by_series": {
     "ai": {
-      "strategy": "most_popular_free",
-      "required_when_available": false,
-      "fallback": "none"
+      "strategy": "explicit",
+      "id": 1255303,
+      "name": "AI IN ALL！",
+      "required_when_available": true,
+      "fallback": "stop",
+      "source_url": "https://www.bilibili.com/v/topic/detail/?topic_id=1255303"
     },
     "arknights": {
       "strategy": "explicit",

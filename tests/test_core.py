@@ -55,7 +55,7 @@ class CoreChecks(unittest.TestCase):
 
     def test_release_activity_is_selected_by_edition_slot(self):
         directory,manifest=self.release()
-        for slot,topic_id,name in [('morning',1325166,'明日方舟终末地创作者应援计划'),('night',8314,'明日方舟创作者应援计划'),('temporary',1325166,'明日方舟终末地创作者应援计划')]:
+        for slot,topic_id,name in [('morning',1325166,'明日方舟终末地创作者应援计划'),('night',8314,'明日方舟创作者应援计划'),('temporary',1255303,'AI IN ALL！')]:
             episode=u.read(directory/'episode.json');episode['edition_slot']=slot;u.write(directory/'episode.json',episode)
             release=u.read(directory/'release.json');release['edition_slot']=slot;u.write(directory/'release.json',release)
             u.from_release(directory,self.home);activity=u.read(manifest)['activity']
@@ -66,21 +66,24 @@ class CoreChecks(unittest.TestCase):
         self.assertEqual(u.read(manifest)['tags'],['AI','OpenAI'])
     def test_series_selects_its_own_activity_and_partition(self):
         directory,manifest=self.release()
-        for slot,series,partition,strategy,topic_id in [('morning','ai','科技数码','most_popular_free',None),
+        for slot,series,partition,strategy,topic_id in [('morning','ai','科技数码','explicit',1255303),
                                                          ('night','arknights','游戏','explicit',8314),('night','endfield','游戏','explicit',1325166)]:
             episode=u.read(directory/'episode.json');episode.update(edition_slot=slot,edition_series=series);u.write(directory/'episode.json',episode)
             release=u.read(directory/'release.json');release['edition_slot']=slot;u.write(directory/'release.json',release)
             u.from_release(directory,self.home);meta=u.read(manifest)
             self.assertEqual((meta['partition'],meta['edition_series'],meta['activity']['strategy']),(partition,series,strategy))
             self.assertEqual(meta['activity'].get('id'),topic_id)
+            # 2026-11-11: AI videos join the AI topic activity 「AI IN ALL！」, matched by ID and exact name.
+            if series=='ai':self.assertEqual(meta['activity']['name'],'AI IN ALL！')
             self.assertEqual(meta['collection']['name'],'AI-News' if series=='ai' else 'Game-News')
         # A temporary game alert goes to Game-News in the 游戏 partition; a temporary AI alert keeps AI-News / 科技数码.
         release=u.read(directory/'release.json');release['edition_slot']='temporary';u.write(directory/'release.json',release)
-        for scenes,name,partition in [([dict(title='维护延迟',game='arknights')],'Game-News','游戏'),([dict(title='版本更新',game='endfield')],'Game-News','游戏'),
-                                      ([dict(title='Codex reset',company='OpenAI')],'AI-News','科技数码')]:
+        # Each temporary alert also joins its topic's activity (2026-11-12).
+        for scenes,name,partition,topic_id in [([dict(title='维护延迟',game='arknights')],'Game-News','游戏',8314),([dict(title='版本更新',game='endfield')],'Game-News','游戏',1325166),
+                                      ([dict(title='Codex reset',company='OpenAI')],'AI-News','科技数码',1255303)]:
             episode.pop('edition_series',None);episode.update(edition_slot='temporary',scenes=scenes);u.write(directory/'episode.json',episode)
             u.from_release(directory,self.home);meta=u.read(manifest)
-            self.assertEqual((meta['collection']['name'],meta['partition']),(name,partition))
+            self.assertEqual((meta['collection']['name'],meta['partition'],meta['activity']['id']),(name,partition,topic_id))
         release['edition_slot']='night';u.write(directory/'release.json',release)
         episode['edition_slot']='night';episode['edition_series']='unknown';u.write(directory/'episode.json',episode)
         self.assertCode('SERIES_DEFAULTS_MISSING',lambda:u.from_release(directory,self.home))

@@ -4,7 +4,7 @@ schema_version=1。路径相对 manifest 所在目录解析，带文件字节数
 
 video 为 {path,bytes,sha256}；covers.four_three / sixteen_nine 另含 width/height。临时新闻另带 alert_id / reset_event_key，counts_toward_daily_main_limit=false。每次发布重新核对 release 状态和资产哈希；所有上传资产必须位于该 release 内。
 
-declarations 明确 original / ai_generated / no_reprint 三个布尔字段。上传页分别核对 AI 声明和自制版权声明。合集优先用稳定 ID，名称重复时仅在唯一已使用合集可明确辨认时自动解析。当前 UI 选项不显示 ID，因此同时核对完整 API 顺序和渲染名称序列，任何不一致均停止，不挑同名第一项。新闻项目活动按 edition_slot 的固定 ID/全名精确选择：morning=1325166、night=8314、temporary=1325166；不可用即停止，不能换热门话题，也不能把活动当普通标签。
+declarations 明确 original / ai_generated / no_reprint 三个布尔字段。上传页分别核对 AI 声明和自制版权声明。合集优先用稳定 ID，名称重复时仅在唯一已使用合集可明确辨认时自动解析。当前 UI 选项不显示 ID，因此同时核对完整 API 顺序和渲染名称序列，任何不一致均停止，不挑同名第一项。新闻项目活动按 edition_slot 的固定 ID/全名精确选择：morning=1325166、night=8314、temporary=1325166；单系列视频按 edition_series 选择（2026-11-11）：ai=1255303「AI IN ALL！」、arknights=8314、endfield=1325166；temporary 临时稿按话题取同一表（游戏临时稿取其游戏的活动，其余取 ai 的活动）；不可用即停止，不能换热门话题，也不能把活动当普通标签。
 
 编辑 manifest 示例：
 

@@ -103,11 +103,16 @@ def from_release(directory,home,output=None):
     series=episode.get('edition_series')
     if series and (series not in cfg.get('activity_by_series',{}) or series not in cfg.get('partition_by_series',{})):
         problem('SERIES_DEFAULTS_MISSING','No configured activity/partition for this edition series',series=series)
-    activity=cfg['activity_by_series'][series] if series else cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
     # 2026-11-09: AI videos go to AI-News, game videos (series or a temporary
     # game alert) to Game-News; anything else keeps the default collection.
     # A temporary game alert also takes its game's partition (游戏), not 科技数码.
     topic=series or (next((s.get('game') for s in episode.get('scenes',[]) if s.get('game') in {'arknights','endfield'}),None) if edition_slot=='temporary' else None)
+    # 2026-11-12: a temporary alert joins its topic's activity too: a game alert
+    # its game's, any other (reset, new model) the AI series' activity.
+    by_series=cfg.get('activity_by_series',{})
+    if series:activity=by_series[series]
+    elif edition_slot=='temporary' and (topic or 'ai') in by_series:activity=by_series[topic or 'ai']
+    else:activity=cfg.get('activity_by_slot',{}).get(edition_slot,cfg['activity'])
     partition=cfg.get('partition_by_series',{}).get(topic,cfg['partition']) if topic else cfg['partition']
     collection=cfg.get('collection_by_series',{}).get(topic,cfg['collection'])
     if release.get('published') or release.get('state') in {'submitted','reviewing','published'}:problem('ALREADY_PUBLISHED','Do not upload an already submitted/published release')
